@@ -20,12 +20,28 @@ const DEFAULT_TOKEN_BUDGET_RATIO = 0.2;
 export type RoutingMode = "off" | "shadow" | "on";
 const DEFAULT_ROUTING_MODE: RoutingMode = "off";
 
+// Layer-7 execution mode. Controls how critical-action tool calls (e.g.
+// memory_set_persona) are handled by the before_tool_call hook.
+//
+//   "autonomous" — log the call, let it through. Current behavior, zero
+//                  friction. Right default for a solo-user personal install.
+//   "assisted"   — trigger the approval flow (requireApproval). OpenClaw's
+//                  approval subsystem surfaces a prompt somewhere (CLI,
+//                  UI, Telegram depending on install). Caller waits on
+//                  human resolution.
+//   "suggest"    — block the call outright with a reason. Agent gets a
+//                  tool error, typically pivots to describing-instead-of-
+//                  doing. Useful when you want the AI to plan but not act.
+export type ExecutionMode = "autonomous" | "assisted" | "suggest";
+const DEFAULT_EXECUTION_MODE: ExecutionMode = "autonomous";
+
 export type MemoryGraphConfig = {
   dbPath: string;
   scope: GraphScope;
   autoIngest: boolean;
   tokenBudgetRatio: number;
   routing: RoutingMode;
+  executionMode: ExecutionMode;
 };
 
 type RawConfig = {
@@ -34,6 +50,7 @@ type RawConfig = {
   autoIngest?: unknown;
   tokenBudgetRatio?: unknown;
   routing?: unknown;
+  executionMode?: unknown;
 };
 
 function resolveDefaultDbPath(): string {
@@ -64,6 +81,13 @@ function coerceRouting(value: unknown): RoutingMode {
   return DEFAULT_ROUTING_MODE;
 }
 
+function coerceExecutionMode(value: unknown): ExecutionMode {
+  if (value === "assisted" || value === "suggest") {
+    return value;
+  }
+  return DEFAULT_EXECUTION_MODE;
+}
+
 export function resolveMemoryGraphConfig(raw: unknown): MemoryGraphConfig {
   const source: RawConfig = raw !== null && typeof raw === "object" ? (raw as RawConfig) : {};
   const dbPath =
@@ -75,5 +99,6 @@ export function resolveMemoryGraphConfig(raw: unknown): MemoryGraphConfig {
     typeof source.autoIngest === "boolean" ? source.autoIngest : DEFAULT_AUTO_INGEST;
   const tokenBudgetRatio = coerceTokenBudgetRatio(source.tokenBudgetRatio);
   const routing = coerceRouting(source.routing);
-  return { dbPath, scope, autoIngest, tokenBudgetRatio, routing };
+  const executionMode = coerceExecutionMode(source.executionMode);
+  return { dbPath, scope, autoIngest, tokenBudgetRatio, routing, executionMode };
 }

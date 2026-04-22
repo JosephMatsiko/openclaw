@@ -4,6 +4,7 @@ import { onSessionTranscriptUpdate } from "openclaw/plugin-sdk/agent-harness";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { resolveMemoryGraphConfig } from "./src/config.js";
 import { MemoryGraphContextEngine } from "./src/engine.js";
+import { runExecutionGate } from "./src/execution-gate.js";
 import { buildMemoryBlockSync, persistTurnFromMessages } from "./src/pipeline.js";
 import { runRoutingHook } from "./src/routing-hook.js";
 import { SqliteGraphStorage } from "./src/sqlite-storage.js";
@@ -319,8 +320,39 @@ export default definePluginEntry({
       }
     });
 
+    // 5) Layer-7 execution gate. Enforces Joseph's SOUL critical-action
+    //    boundary at runtime on the `before_tool_call` hook. Modes:
+    //    autonomous (default, log-and-pass), assisted (requireApproval via
+    //    OpenClaw's approval subsystem), suggest (block + explain).
+    //    Covers MCP tools only — claude-cli's intrinsic tools run in-binary
+    //    and bypass OpenClaw's hook layer.
+    api.on("before_tool_call", async (event) => {
+      try {
+        return runExecutionGate(
+          {
+            toolName: event.toolName,
+            params: event.params,
+            runId: event.runId,
+            toolCallId: event.toolCallId,
+          },
+          {
+            mode: config.executionMode,
+            logger: {
+              info: (msg) => api.logger.info(msg),
+              warn: (msg) => api.logger.warn(msg),
+            },
+          },
+        );
+      } catch (err) {
+        api.logger.warn(
+          `memory-graph: execution gate threw (${err instanceof Error ? err.message : String(err)}); falling open`,
+        );
+        return undefined;
+      }
+    });
+
     api.logger.info(
-      `memory-graph: active (scope: ${config.scope}, scopeId: ${scopeId}, routing: ${config.routing}, dbPath: ${config.dbPath})`,
+      `memory-graph: active (scope: ${config.scope}, scopeId: ${scopeId}, routing: ${config.routing}, executionMode: ${config.executionMode}, dbPath: ${config.dbPath})`,
     );
   },
 });
