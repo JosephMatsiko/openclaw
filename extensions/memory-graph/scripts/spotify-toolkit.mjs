@@ -587,5 +587,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 
+// `--login` bootstraps the refresh token without standing up the MCP server.
+// Useful for first-run setup on a fresh machine: runs the PKCE flow, writes
+// credentials, exits. Subsequent runs boot as an MCP server and lazily
+// refresh as needed.
+if (process.argv.includes("--login")) {
+  const app = loadAppCreds();
+  if (!app) {
+    console.error(
+      "spotify: no credentials at ~/.openclaw/agents/main/agent/auth-profiles.json profiles['spotify:default'] {key, secret}",
+    );
+    process.exit(2);
+  }
+  console.error("spotify: opening browser for consent...");
+  try {
+    await runOAuthFlow(app.clientId, app.clientSecret);
+    console.error(`spotify: auth complete. refresh token saved to ${CREDENTIALS_PATH}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`spotify: login failed — ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
