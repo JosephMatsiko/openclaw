@@ -63,12 +63,12 @@ function runOsascript(args, { timeoutMs = 15000 } = {}) {
   });
 }
 
-function jxa(script) {
-  return runOsascript(["-l", "JavaScript", "-e", script]);
+function jxa(script, opts = {}) {
+  return runOsascript(["-l", "JavaScript", "-e", script], opts);
 }
 
-function applescript(script) {
-  return runOsascript(["-e", script]);
+function applescript(script, opts = {}) {
+  return runOsascript(["-e", script], opts);
 }
 
 function sanitizeJxaString(s) {
@@ -137,6 +137,251 @@ async function reminders_list({ list, limit = 20 } = {}) {
       if (out.length >= cap) break;
     }
     JSON.stringify(out);
+  `;
+  const res = await jxa(script);
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+// ---- Calendar (Calendar.app via JXA) -------------------------------------
+
+async function calendar_list_calendars() {
+  const script = `
+    const app = Application("Calendar");
+    const out = [];
+    for (const c of app.calendars()) {
+      out.push({ name: c.name(), writable: c.writable() });
+    }
+    JSON.stringify(out);
+  `;
+  const res = await jxa(script);
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+async function calendar_events_range({ startISO, endISO, calendar, limit = 100 } = {}) {
+  if (!startISO || !endISO) {
+    return { error: "startISO and endISO required" };
+  }
+  const calFilter = calendar
+    ? `const cals = app.calendars.whose({ name: "${sanitizeJxaString(calendar)}" });`
+    : `const cals = app.calendars();`;
+  const script = `
+    const app = Application("Calendar");
+    const startD = new Date("${sanitizeJxaString(startISO)}");
+    const endD = new Date("${sanitizeJxaString(endISO)}");
+    ${calFilter}
+    const out = [];
+    const cap = ${Number.isFinite(limit) && limit > 0 ? limit : 100};
+    for (const c of cals) {
+      for (const e of c.events()) {
+        const sd = e.startDate();
+        const ed = e.endDate();
+        if (!sd || sd < startD || sd >= endD) continue;
+        out.push({
+          uid: e.uid(),
+          summary: e.summary(),
+          location: e.location() || null,
+          startDate: sd ? sd.toISOString() : null,
+          endDate: ed ? ed.toISOString() : null,
+          calendar: c.name(),
+          allDay: e.alldayEvent(),
+        });
+        if (out.length >= cap) break;
+      }
+      if (out.length >= cap) break;
+    }
+    out.sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? ""));
+    JSON.stringify(out);
+  `;
+  const res = await jxa(script);
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+async function calendar_events_today({ calendar } = {}) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+  return calendar_events_range({ startISO: start, endISO: end, calendar });
+}
+
+// ---- Apple Notes ---------------------------------------------------------
+
+async function notes_search({ query, limit = 20, deep = false } = {}) {
+  if (!query || !String(query).trim()) {
+    return { error: "query required" };
+  }
+  const q = sanitizeJxaString(String(query).toLowerCase());
+  const cap = Number.isFinite(limit) && limit > 0 ? limit : 20;
+  // Two modes. Fast (default): name-only scan — ~1s on 515 notes.
+  // Deep: iterate plaintext too — slower but catches body-only matches.
+  const script = `
+    const app = Application("Notes");
+    const hits = [];
+    const q = "${q}";
+    const cap = ${cap};
+    const deep = ${deep ? "true" : "false"};
+    // Pass 1: name scan — always cheap.
+    for (const n of app.notes()) {
+      try {
+        const name = (n.name() || "").toLowerCase();
+        if (name.includes(q)) {
+          hits.push({ id: n.id(), matchedOn: "name" });
+        }
+      } catch {}
+      if (hits.length >= cap) break;
+    }
+    // Pass 2: body scan, if requested AND we have room.
+    if (deep && hits.length < cap) {
+      const seen = new Set(hits.map(h => h.id));
+      for (const n of app.notes()) {
+        if (hits.length >= cap) break;
+        try {
+          if (seen.has(n.id())) continue;
+          const body = (n.plaintext() || "").toLowerCase();
+          if (body.includes(q)) {
+            hits.push({ id: n.id(), matchedOn: "body" });
+          }
+        } catch {}
+      }
+    }
+    // Hydrate top-N with preview + metadata.
+    const out = [];
+    for (const h of hits) {
+      try {
+        const n = app.notes.byId(h.id);
+        out.push({
+          id: h.id,
+          name: n.name(),
+          matchedOn: h.matchedOn,
+          preview: (n.plaintext() || "").slice(0, 240),
+          modificationDate: (function() { try { const d = n.modificationDate(); return d ? d.toISOString() : null; } catch { return null; } })(),
+          folder: (function() { try { return n.container().name(); } catch { return null; } })(),
+        });
+      } catch {}
+    }
+    JSON.stringify(out);
+  `;
+  const res = await jxa(script, { timeoutMs: deep ? 90000 : 20000 });
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+async function notes_list_recent({ limit = 10 } = {}) {
+  // Two-pass. Pass 1: lightweight (id + name + modificationDate) across
+  // ALL notes — plaintext is the slow part, so skip it here. Pass 2: for
+  // the top N after sort, fetch plaintext for the preview. 515 notes
+  // scanned metadata-only in JXA runs in ~1-2s.
+  const cap = Number.isFinite(limit) && limit > 0 ? limit : 10;
+  const script = `
+    const app = Application("Notes");
+    const meta = [];
+    for (const n of app.notes()) {
+      try {
+        let mod = null;
+        try { const d = n.modificationDate(); if (d) mod = d.toISOString(); } catch {}
+        meta.push({ id: n.id(), name: n.name(), modificationDate: mod });
+      } catch {}
+    }
+    meta.sort((a, b) => (b.modificationDate ?? "").localeCompare(a.modificationDate ?? ""));
+    const top = meta.slice(0, ${cap});
+    const out = [];
+    for (const m of top) {
+      try {
+        const n = app.notes.byId(m.id);
+        out.push({
+          id: m.id,
+          name: m.name,
+          preview: (n.plaintext() || "").slice(0, 160),
+          modificationDate: m.modificationDate,
+          folder: (function() { try { return n.container().name(); } catch { return null; } })(),
+        });
+      } catch {
+        out.push({ ...m, preview: null, folder: null });
+      }
+    }
+    JSON.stringify(out);
+  `;
+  const res = await jxa(script, { timeoutMs: 60000 });
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+async function notes_get({ id, name } = {}) {
+  if (!id && !name) {
+    return { error: "id or name required" };
+  }
+  const lookup = id
+    ? `const n = app.notes.byId("${sanitizeJxaString(id)}");`
+    : `const n = app.notes.whose({ name: "${sanitizeJxaString(name)}" })[0];`;
+  const script = `
+    const app = Application("Notes");
+    ${lookup}
+    if (!n) throw new Error("not found");
+    JSON.stringify({
+      id: n.id(),
+      name: n.name(),
+      body: n.plaintext() || "",
+      modificationDate: (function() { try { const d = n.modificationDate(); return d ? d.toISOString() : null; } catch { return null; } })(),
+      folder: (function() { try { return n.container().name(); } catch { return null; } })(),
+    });
+  `;
+  const res = await jxa(script);
+  if (!res.ok) {
+    return { error: res.stderr || "osascript failed" };
+  }
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    return { raw: res.stdout };
+  }
+}
+
+async function notes_create({ title, body = "", folder } = {}) {
+  if (!title) {
+    return { error: "title required" };
+  }
+  const folderPick = folder
+    ? `const f = app.folders.whose({ name: "${sanitizeJxaString(folder)}" })[0]; if (!f) throw new Error("folder not found");`
+    : `const f = app.defaultAccount().defaultFolder();`;
+  const script = `
+    const app = Application("Notes");
+    ${folderPick}
+    const html = "<h1>" + ${JSON.stringify(title)} + "</h1><p>" + ${JSON.stringify(body)} + "</p>";
+    const n = app.Note({ name: ${JSON.stringify(title)}, body: html });
+    f.notes.push(n);
+    JSON.stringify({ id: n.id(), name: n.name(), folder: f.name() });
   `;
   const res = await jxa(script);
   if (!res.ok) {
@@ -343,6 +588,91 @@ const toolDefs = [
       additionalProperties: false,
     },
   },
+  {
+    name: "calendar_list_calendars",
+    description:
+      "List Calendar.app calendars on Joseph's Mac. Returns name + writable flag for each. Works via AppleScript without Full Disk Access.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "calendar_events_range",
+    description:
+      "List Calendar.app events in [startISO, endISO) across all calendars (or a named one). Returns uid/summary/location/start/end/calendar/allDay, sorted by start. Works via AppleScript without Full Disk Access.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        startISO: { type: "string" },
+        endISO: { type: "string" },
+        calendar: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+      },
+      required: ["startISO", "endISO"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_events_today",
+    description:
+      "Convenience: list today's events (midnight-to-midnight, local time) across all calendars or a named one.",
+    inputSchema: {
+      type: "object",
+      properties: { calendar: { type: "string" } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "notes_search",
+    description:
+      "Case-insensitive substring search across Apple Notes. Fast name-only scan by default (~1s on 500 notes). Pass `deep:true` to also scan body text — accurate but slow (up to ~1min on a large note corpus). Returns id/name/matchedOn/preview/folder/modificationDate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        deep: { type: "boolean" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "notes_list_recent",
+    description:
+      "List the most recently modified notes (default 10, max 100). Returns id/name/preview/folder/modificationDate.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "integer", minimum: 1, maximum: 100 } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "notes_get",
+    description:
+      "Fetch the full plaintext body of a specific note by id (from notes_search/notes_list_recent) or by name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "notes_create",
+    description:
+      "Create a new note with title + body. Goes in the default folder unless `folder` is named. Body is plain text; basic HTML (<h1>, <p>) will render.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1 },
+        body: { type: "string" },
+        folder: { type: "string" },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefs }));
@@ -371,6 +701,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       break;
     case "mac_app_open":
       result = await mac_app_open(args);
+      break;
+    case "calendar_list_calendars":
+      result = await calendar_list_calendars();
+      break;
+    case "calendar_events_range":
+      result = await calendar_events_range(args);
+      break;
+    case "calendar_events_today":
+      result = await calendar_events_today(args);
+      break;
+    case "notes_search":
+      result = await notes_search(args);
+      break;
+    case "notes_list_recent":
+      result = await notes_list_recent(args);
+      break;
+    case "notes_get":
+      result = await notes_get(args);
+      break;
+    case "notes_create":
+      result = await notes_create(args);
       break;
     default:
       throw new Error(`unknown tool: ${name}`);
