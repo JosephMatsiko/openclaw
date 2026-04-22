@@ -588,5 +588,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 
+// `--login` bootstraps the refresh token without standing up the MCP server.
+// Mirrors the pattern in spotify-toolkit.mjs for first-run setup.
+if (process.argv.includes("--login")) {
+  const app = loadAppCreds();
+  if (!app) {
+    console.error(
+      "gmail: no credentials at ~/.openclaw/agents/main/agent/auth-profiles.json profiles['google-gmail:default'] {key, secret}",
+    );
+    process.exit(2);
+  }
+  console.error("gmail: opening browser for consent...");
+  try {
+    await runOAuthFlow(app.clientId, app.clientSecret);
+    console.error(`gmail: auth complete. refresh token saved to ${CREDENTIALS_PATH}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`gmail: login failed — ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
