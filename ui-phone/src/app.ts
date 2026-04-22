@@ -103,6 +103,19 @@ export class ChuckApp extends LitElement {
       font-size: 12px;
       color: var(--muted);
     }
+    header .new-chat {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    header .new-chat:hover {
+      background: var(--bg-elevated);
+    }
     header .dot {
       width: 8px;
       height: 8px;
@@ -336,6 +349,21 @@ export class ChuckApp extends LitElement {
     });
   }
 
+  // Fork a fresh session keyed on the current wall-clock so nothing
+  // bleeds from the old one. The gateway treats any `agent:<agent>:<key>`
+  // shape as a separate session; history for the new key starts empty.
+  // Encoded in base36 + short random suffix to stay URL-safe and compact.
+  private startNewSession(): void {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    this.sessionKey = `agent:main:${id}`;
+    this.messages = [];
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set("session", this.sessionKey);
+    globalThis.history.replaceState(null, "", url.toString());
+    // No history fetch — the new session has none. chat.send on the next
+    // message will materialize the session server-side.
+  }
+
   private async send(): Promise<void> {
     const text = this.draft.trim();
     if (!text || this.sending) {
@@ -397,6 +425,13 @@ export class ChuckApp extends LitElement {
     return html`
       <header>
         <div class="title">🦞 Chuck</div>
+        <button
+          class="new-chat"
+          @click=${() => this.startNewSession()}
+          title="Fork a fresh session — history stays on the old one."
+        >
+          New chat
+        </button>
         <div class="status">
           <span class="dot ${s.cls}"></span>
           ${s.label}
