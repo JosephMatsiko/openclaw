@@ -1,0 +1,56 @@
+{
+  "id": "memory-graph",
+  "kind": "memory",
+  "uiHints": {
+    "dbPath": {
+      "label": "Database Path",
+      "placeholder": "~/.openclaw/memory/graph.sqlite",
+      "advanced": true,
+      "help": "SQLite file backing the graph store."
+    },
+    "scope": {
+      "label": "Scope",
+      "help": "Where graph nodes are shared. 'workspace' shares across all agents in the workspace; 'agent' isolates per agent.",
+      "placeholder": "workspace"
+    },
+    "autoIngest": {
+      "label": "Auto Ingest",
+      "help": "Extract facts, preferences, and open loops from transcript turns automatically."
+    },
+    "tokenBudgetRatio": {
+      "label": "Token Budget Ratio",
+      "help": "Fraction of the turn token budget reserved for graph-injected context.",
+      "advanced": true
+    },
+    "routing": {
+      "label": "Layer-5 Routing",
+      "help": "Gateway pre-inference router. 'off' keeps the configured primary model for every turn (default). 'shadow' runs the classifier and logs the verdict without enforcing it. 'on' overrides provider+model per the classifier verdict (trivial→google/gemini-2.5-flash, contextual→google/gemini-2.5-pro, complex→keep default). Do NOT use 'on' until your google provider inference path is verified working.",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["workspace", "agent"]
+      },
+      "autoIngest": {
+        "type": "boolean"
+      },
+      "tokenBudgetRatio": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "routing": {
+        "type": "string",
+        "enum": ["off", "shadow", "on"]
+      }
+    }
+  }
+}

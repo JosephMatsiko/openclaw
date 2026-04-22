@@ -237,6 +237,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/memory-wiki/**"
+"extensions: memory-graph":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/memory-graph/**"
 "extensions: open-prose":
   - changed-files:
       - any-glob-to-any-file:
