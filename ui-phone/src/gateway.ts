@@ -1,18 +1,35 @@
 // Lightweight WebSocket client for the OpenClaw gateway.
 //
 // Speaks the same frame protocol as the Control UI (ui/src/ui/gateway.ts)
-// but strips everything the phone doesn't need: device-identity signing,
-// retry-with-fresh-key loops, error taxonomy, reconnect throttling. We
-// just want: connect, send request, subscribe to events, stay alive.
+// but strips the retry-with-fresh-key loops, error taxonomy, reconnect
+// throttling — just the minimum the phone needs. We DO sign the connect
+// payload with an ed25519 device identity because the gateway won't grant
+// operator.* scopes to a token-only device.
 //
-// Auth flow on mobile:
+// Auth flow:
 // 1. Token from URL query (?token=...), URL hash (#token=...), or localStorage.
-// 2. First frame: { type: "connect", params: { auth: { token } } }.
-// 3. On pair-required error the server hands back a requestId — we surface
-//    that to the user for CLI approval (same one-time flow as Control UI).
+// 2. Load/generate an ed25519 device identity (shared localStorage with the
+//    Control UI on the same origin — inherits its paired approval).
+// 3. First frame: `req` with method="connect", carrying the client info,
+//    requested role+scopes, token, and a signed device envelope.
+// 4. On pair-required error the server hands back a requestId — surface it
+//    so the user can run `openclaw devices approve <requestId>` on the Mac.
+
+import { loadOrCreateDeviceIdentity, signDeviceAuth } from "./device-identity.ts";
 
 const TOKEN_LS_KEY = "openclaw.phone.token.v1";
 const BASE_URL_LS_KEY = "openclaw.phone.baseUrl.v1";
+
+const PHONE_CLIENT_ID = "webchat-ui";
+const PHONE_CLIENT_MODE = "webchat";
+const PHONE_ROLE = "operator";
+const PHONE_SCOPES = [
+  "operator.admin",
+  "operator.read",
+  "operator.write",
+  "operator.approvals",
+  "operator.pairing",
+] as const;
 
 export type GatewayEvent = {
   type: "event";
@@ -104,6 +121,10 @@ export class PhoneGateway {
   private status: GatewayStatusDetail = { status: "closed" };
   private seq = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Request id for the connect handshake — the gateway acks with a normal
+  // `res` frame carrying this id, so onMessage matches it specially rather
+  // than looking it up in the pending map.
+  private connectReqId: string | null = null;
 
   constructor(options?: { url?: string; token?: string }) {
     this.token = options?.token ?? readStoredToken();
@@ -184,6 +205,15 @@ export class PhoneGateway {
   }
 
   private onOpen(): void {
+    // The server sends a `connect.challenge` event with a nonce *before*
+    // we're supposed to send the connect request — the device signature
+    // must use that server-generated nonce. See
+    // src/gateway/server/ws-connection.ts where connectNonce = randomUUID()
+    // is sent as the first frame. We stash the challenge-received promise
+    // and build the connect frame once it resolves.
+  }
+
+  private async sendConnect(challengeNonce: string): Promise<void> {
     if (!this.token) {
       this.setStatus({
         status: "auth-error",
@@ -192,14 +222,64 @@ export class PhoneGateway {
       this.ws?.close();
       return;
     }
-    const connectFrame = {
-      type: "connect",
-      params: {
-        auth: { token: this.token },
-        client: { name: "openclaw-phone", version: "0.1.0", mode: "phone" },
-      },
-    };
-    this.ws?.send(JSON.stringify(connectFrame));
+    try {
+      // Load the ed25519 identity. Shared STORAGE_KEY with the Control UI
+      // means the phone inherits whatever pairing approval the desktop
+      // session already has (same origin = same localStorage).
+      const identity = await loadOrCreateDeviceIdentity();
+      const signedAtMs = Date.now();
+      // Use the server's challenge nonce, NOT a client-generated one.
+      // The gateway rejects "device nonce mismatch" otherwise.
+      const nonce = challengeNonce;
+      const device = await signDeviceAuth(identity, {
+        clientId: PHONE_CLIENT_ID,
+        clientMode: PHONE_CLIENT_MODE,
+        role: PHONE_ROLE,
+        scopes: [...PHONE_SCOPES],
+        signedAtMs,
+        token: this.token,
+        nonce,
+        platform: "web",
+        deviceFamily: null,
+      });
+      this.connectReqId = `c-${signedAtMs.toString(36)}-${(this.seq += 1).toString(36)}`;
+      // ConnectParams schema: src/gateway/protocol/schema/frames.ts. The
+      // signed device envelope is how the gateway grants operator.*
+      // scopes — without it, chat.history returns
+      // "missing scope: operator.read" even with a valid token. Protocol
+      // version 3 is required for the v3 payload layout (platform +
+      // deviceFamily fields).
+      const connectFrame = {
+        type: "req",
+        id: this.connectReqId,
+        method: "connect",
+        params: {
+          minProtocol: 3,
+          maxProtocol: 3,
+          client: {
+            id: PHONE_CLIENT_ID,
+            displayName: "Chuck (phone)",
+            version: "0.1.0",
+            platform: "web",
+            mode: PHONE_CLIENT_MODE,
+          },
+          role: PHONE_ROLE,
+          scopes: [...PHONE_SCOPES],
+          caps: ["tool-events"],
+          device,
+          auth: { token: this.token },
+          userAgent: globalThis.navigator?.userAgent ?? "openclaw-phone",
+          locale: globalThis.navigator?.language ?? "en",
+        },
+      };
+      this.ws?.send(JSON.stringify(connectFrame));
+    } catch (err) {
+      this.setStatus({
+        status: "auth-error",
+        message: `device sign failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      this.ws?.close();
+    }
   }
 
   private onMessage(ev: MessageEvent<string>): void {
@@ -209,31 +289,65 @@ export class PhoneGateway {
     } catch {
       return;
     }
-    if (frame.type === "connect-ack") {
-      this.setStatus({ status: "ready" });
-      return;
-    }
-    if (frame.type === "connect-error" || frame.type === "error") {
-      const err = (frame as { error?: { code?: string; message?: string; details?: unknown } })
-        .error;
-      // The gateway signals pair-required with a specific error code + a
-      // requestId in details; surface it so the user can run
-      // `openclaw devices approve <requestId>` on the Mac.
-      const code = err?.code ?? "unknown";
-      const details = err?.details as { requestId?: string } | undefined;
-      if (code === "PAIR_REQUIRED" || code === "DEVICE_PAIRING_REQUIRED") {
-        this.setStatus({
-          status: "pair-required",
-          pairRequestId: details?.requestId,
-          message: err?.message,
-        });
+    // Connect handshake ack comes as a normal `res` frame tagged with our
+    // connectReqId — catch it here before the generic res handler would
+    // try to look it up in the pending map (it isn't there).
+    if (
+      frame.type === "res" &&
+      this.connectReqId &&
+      (frame as GatewayResponse).id === this.connectReqId
+    ) {
+      const res = frame as GatewayResponse;
+      this.connectReqId = null;
+      if (res.ok) {
+        this.setStatus({ status: "ready" });
       } else {
-        this.setStatus({ status: "auth-error", message: err?.message ?? code });
+        const code = res.error?.code ?? "unknown";
+        // The gateway uses code=PAIRING_REQUIRED and puts the detail code +
+        // requestId under err.details (see
+        // src/gateway/protocol/connect-error-details.ts). `details` may
+        // carry a nested `details` that contains the actual requestId.
+        const rawDetails = res.error?.details as
+          | {
+              code?: string;
+              requestId?: string;
+              details?: { requestId?: string };
+            }
+          | undefined;
+        const requestId = rawDetails?.requestId ?? rawDetails?.details?.requestId;
+        if (
+          code === "NOT_PAIRED" ||
+          code === "PAIRING_REQUIRED" ||
+          code === "PAIR_REQUIRED" ||
+          code === "DEVICE_PAIRING_REQUIRED" ||
+          code === "DEVICE_PAIR_PENDING"
+        ) {
+          this.setStatus({
+            status: "pair-required",
+            pairRequestId: requestId,
+            message: res.error?.message,
+          });
+        } else {
+          this.setStatus({ status: "auth-error", message: res.error?.message ?? code });
+        }
       }
       return;
     }
     if (frame.type === "event") {
       const event = frame as GatewayEvent;
+      // First frame from server is a connect.challenge event carrying the
+      // nonce the device signature must use. Kick off sendConnect here.
+      if (event.event === "connect.challenge") {
+        const payload = event.payload as { nonce?: string } | null;
+        const nonce = typeof payload?.nonce === "string" ? payload.nonce : null;
+        if (nonce) {
+          void this.sendConnect(nonce);
+        } else {
+          this.setStatus({ status: "auth-error", message: "missing challenge nonce" });
+          this.ws?.close();
+        }
+        return;
+      }
       for (const handler of this.eventHandlers) {
         try {
           handler(event);

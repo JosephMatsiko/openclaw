@@ -16,5 +16,11 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     target: "es2022",
+    // The Control UI's gateway handler has a hardcoded rewrite that strips
+    // everything in the URL before "/assets/" to support mounting the UI
+    // under a basePath. Any /m/assets/* request therefore collides with the
+    // Control UI's own /assets/ dir. Output our bundle under /m/bundle/
+    // instead so the rewrite doesn't misfire.
+    assetsDir: "bundle",
   },
 });
