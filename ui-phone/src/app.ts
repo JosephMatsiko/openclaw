@@ -350,9 +350,15 @@ export class ChuckApp extends LitElement {
     ];
     this.scrollToBottomSoon();
     try {
+      // chat.send schema expects `message` (not `text`) and requires an
+      // idempotencyKey for retry de-dup. See src/gateway/protocol/schema/
+      // chat-frames.ts — resending the same key while the run is in flight
+      // returns { status: "in_flight" }.
+      const idempotencyKey = `phone-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       await this.gw.request("chat.send", {
         sessionKey: this.sessionKey,
-        text,
+        message: text,
+        idempotencyKey,
       });
     } catch (err) {
       this.pushSystem(`send failed: ${(err as Error).message}`);
