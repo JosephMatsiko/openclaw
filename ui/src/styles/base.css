@@ -474,6 +474,15 @@
 html,
 body {
   height: 100%;
+  /* iOS dynamic viewport: 100dvh excludes the address bar when it's shown,
+     so height tracks the actual visible area as Safari collapses the bar.
+     Fixes the layout jump users see when the chrome shows/hides. */
+  min-height: 100dvh;
+  /* Kill any runaway horizontal scroll — children that overshoot the
+     viewport are the usual cause of iOS rubber-band bounce. Per-component
+     `overflow-x: auto` containers (code blocks, tool cards, tables) still
+     scroll because they set their own stacking context. */
+  overflow-x: hidden;
 }
 
 body {
@@ -484,6 +493,15 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Safe-area insets: on notched iPhones / iPad home-indicator devices the
+     OS reserves edge space. viewport-fit=cover (index.html) opts the app
+     into edge-to-edge rendering, these paddings then keep content off the
+     physical bezel/notch/home-indicator. env(...) evaluates to 0px on
+     devices/browsers without insets, so this is a no-op on desktop. */
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
 
 @media (min-width: 1600px) {
