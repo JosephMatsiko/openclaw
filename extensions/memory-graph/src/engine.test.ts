@@ -115,6 +115,34 @@ describe("MemoryGraphContextEngine afterTurn", () => {
     await engine.dispose();
   });
 
+  test("warns once via logger when storage is absent across many calls", async () => {
+    const warnings: string[] = [];
+    const engine = new MemoryGraphContextEngine({
+      logger: { warn: (m) => warnings.push(m) },
+    });
+    await engine.afterTurn({
+      sessionId: "sess-1",
+      sessionFile: "/tmp/sess-1.jsonl",
+      messages: makeTurn("hi", "hello") as never,
+      prePromptMessageCount: 0,
+    });
+    await engine.afterTurn({
+      sessionId: "sess-1",
+      sessionFile: "/tmp/sess-1.jsonl",
+      messages: makeTurn("again", "ok") as never,
+      prePromptMessageCount: 0,
+    });
+    await engine.assemble({
+      sessionId: "sess-1",
+      messages: [],
+      prompt: "p",
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("memory-graph");
+    expect(warnings[0]).toContain("no-op");
+    await engine.dispose();
+  });
+
   test("honors scope isolation", async () => {
     const storage = new SqliteGraphStorage({ dbPath: ":memory:" });
     const engineA = new MemoryGraphContextEngine({

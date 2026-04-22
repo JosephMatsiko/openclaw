@@ -13,10 +13,19 @@ import type { GraphScope } from "./types.js";
 
 type CE = ContextEngine;
 
+// Structural subset of `PluginLogger` from `src/plugins/types.ts`. Inlined
+// here to avoid taking a runtime dep on the host package — any logger with
+// these methods will satisfy the contract.
+export type MemoryGraphEngineLogger = {
+  info?: (message: string) => void;
+  warn: (message: string) => void;
+};
+
 export type MemoryGraphEngineParams = {
   storage?: GraphStorage;
   scope?: GraphScope;
   scopeId?: string;
+  logger?: MemoryGraphEngineLogger;
 };
 
 // ContextEngine implementation for memory-graph.
@@ -36,11 +45,29 @@ export class MemoryGraphContextEngine implements ContextEngine {
   private readonly storage?: GraphStorage;
   private readonly scope: GraphScope;
   private readonly scopeId: string;
+  private readonly logger?: MemoryGraphEngineLogger;
+  private warnedMissingStorage = false;
 
   constructor(params: MemoryGraphEngineParams = {}) {
     this.storage = params.storage;
     this.scope = params.scope ?? "workspace";
     this.scopeId = params.scopeId ?? "default";
+    this.logger = params.logger;
+  }
+
+  // Emit at most one warning per engine instance when we hit a no-op branch
+  // that would otherwise be invisible. Production wiring (index.ts) always
+  // passes storage, so this firing is a real misconfiguration signal — not
+  // expected steady-state noise. Tests that intentionally construct without
+  // storage simply omit `logger` and stay silent.
+  private warnMissingStorageOnce(operation: string): void {
+    if (this.warnedMissingStorage || !this.logger) {
+      return;
+    }
+    this.warnedMissingStorage = true;
+    this.logger.warn(
+      `memory-graph: ${operation} called without storage — engine running as no-op (scope: ${this.scope}, scopeId: ${this.scopeId})`,
+    );
   }
 
   async ingest(_params: Parameters<CE["ingest"]>[0]): Promise<IngestResult> {
@@ -49,6 +76,7 @@ export class MemoryGraphContextEngine implements ContextEngine {
 
   async assemble(params: Parameters<CE["assemble"]>[0]): Promise<AssembleResult> {
     if (!this.storage) {
+      this.warnMissingStorageOnce("assemble");
       return { messages: params.messages, estimatedTokens: 0 };
     }
     const result = await buildMemoryBlock({
@@ -67,13 +95,23 @@ export class MemoryGraphContextEngine implements ContextEngine {
   }
 
   async afterTurn(params: Parameters<NonNullable<CE["afterTurn"]>>[0]): Promise<void> {
-    if (!this.storage || params.isHeartbeat) {
+    if (!this.storage) {
+      this.warnMissingStorageOnce("afterTurn");
+      return;
+    }
+    if (params.isHeartbeat) {
       return;
     }
     const newMessages = params.messages.slice(params.prePromptMessageCount);
     if (newMessages.length === 0) {
       return;
     }
+    // Intentional drop: the graph is keyed on user-text claims. `extractClaims`
+    // only consumes user text, and a thread node's summary is built from the
+    // user message — so an assistant-only or tool-only batch has nothing
+    // persistable here. Universal write coverage for these batches comes
+    // through the transcript-listener path in index.ts, which pairs each
+    // assistant chunk back to the buffered user text.
     const userText = lastUserText(newMessages);
     if (!userText) {
       return;
@@ -115,6 +153,7 @@ export class MemoryGraphContextEngine implements ContextEngine {
     // here to act as a silencer.
     //
     // Tests that spin up a storage just for one engine close it
-    // themselves via `storage.close()` (see engine.test.ts:147).
+    // themselves via `storage.close()` (see the scope-isolation test in
+    // engine.test.ts).
   }
 }

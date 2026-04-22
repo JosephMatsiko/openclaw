@@ -72,6 +72,7 @@ export default definePluginEntry({
         storage: store,
         scope: config.scope,
         scopeId,
+        logger: api.logger,
       });
     });
     if (!registration.ok) {
