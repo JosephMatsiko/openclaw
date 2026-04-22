@@ -187,6 +187,26 @@ export class ChuckApp extends LitElement {
       border: 1px solid var(--border);
       border-bottom-left-radius: 4px;
     }
+    .msg.assistant .bubble.streaming::after {
+      content: "";
+      display: inline-block;
+      width: 7px;
+      height: 14px;
+      margin-left: 3px;
+      vertical-align: text-bottom;
+      background: var(--accent);
+      border-radius: 1px;
+      animation: bubble-pulse 0.9s ease-in-out infinite;
+    }
+    @keyframes bubble-pulse {
+      0%,
+      100% {
+        opacity: 0.25;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
     .msg.tool .bubble {
       background: var(--accent-subtle);
       color: var(--text);
@@ -297,32 +317,60 @@ export class ChuckApp extends LitElement {
   }
 
   private handleEvent(ev: GatewayEvent): void {
-    // chat.* events carry the same shape as chat.history entries — reuse
-    // the normalizer so streaming deltas and final frames converge cleanly.
-    if (!ev.event.startsWith("chat.")) {
+    // Chat event shape: { runId, sessionKey, seq, state, message, ... }
+    // state ∈ {delta, final, aborted, error}. ChatEventSchema lives in
+    // src/gateway/protocol/schema/logs-chat.ts. The server publishes a
+    // single event name "chat" (not "chat.*"), so match exactly.
+    if (ev.event !== "chat") {
       return;
     }
-    const payload = ev.payload as
-      | (ChatHistoryEntry & { sessionKey?: string; kind?: string })
-      | null;
-    if (!payload) {
+    const payload = ev.payload as {
+      runId?: string;
+      sessionKey?: string;
+      seq?: number;
+      state?: "delta" | "final" | "aborted" | "error";
+      message?: ChatHistoryEntry;
+      errorMessage?: string;
+      errorKind?: string;
+    } | null;
+    if (!payload?.runId) {
       return;
     }
     if (payload.sessionKey && payload.sessionKey !== this.sessionKey) {
       return;
     }
-    const msg = normalizeEntry(payload, this.messages.length);
+    // Bucket assistant deltas under a stable bubble id keyed on runId so
+    // incremental text accumulates in one place instead of spawning a new
+    // bubble per delta. The transcript's own msg.id is ignored for
+    // streaming — it changes per delta in some runtimes.
+    const bubbleId = `run-${payload.runId}`;
+    if (payload.state === "error") {
+      this.pushSystem(`error: ${payload.errorMessage ?? payload.errorKind ?? "unknown"}`);
+      return;
+    }
+    if (payload.state === "aborted") {
+      const idx = this.messages.findIndex((m) => m.id === bubbleId);
+      if (idx >= 0) {
+        const next = [...this.messages];
+        next[idx] = { ...next[idx], streaming: false, text: `${next[idx].text} [aborted]` };
+        this.messages = next;
+      }
+      return;
+    }
+    // state === "delta" or "final"
+    const msg = payload.message ? normalizeEntry(payload.message, this.messages.length) : null;
     if (!msg) {
       return;
     }
-    // If we already have this id (streaming delta), replace in-place.
-    const idx = this.messages.findIndex((m) => m.id === msg.id);
+    const streaming = payload.state === "delta";
+    const shaped: ChatMessage = { ...msg, id: bubbleId, streaming };
+    const idx = this.messages.findIndex((m) => m.id === bubbleId);
     if (idx >= 0) {
       const next = [...this.messages];
-      next[idx] = msg;
+      next[idx] = shaped;
       this.messages = next;
     } else {
-      this.messages = [...this.messages, msg];
+      this.messages = [...this.messages, shaped];
     }
     this.scrollToBottomSoon();
   }
@@ -467,7 +515,7 @@ export class ChuckApp extends LitElement {
               ${m.role === "tool"
                 ? html`<div class="meta">tool · ${m.toolName ?? "unknown"}</div>`
                 : nothing}
-              <div class="bubble">${m.text}</div>
+              <div class="bubble ${m.streaming ? "streaming" : ""}">${m.text}</div>
             </div>
           `,
         )}
