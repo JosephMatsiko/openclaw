@@ -55,7 +55,6 @@ function parseArgs(argv) {
 }
 
 const HOME = homedir();
-const AUTH_PATH = join(HOME, ".openclaw", "agents", "main", "agent", "auth-profiles.json");
 const DB_PATH = join(HOME, ".openclaw", "memory", "graph.sqlite");
 const WORKSPACE_MEMORY = join(HOME, ".openclaw", "workspace", "memory");
 const SUMMARIES_DIR = join(WORKSPACE_MEMORY, "summaries");
@@ -73,7 +72,6 @@ See header comment for flags.`);
 
 const SEND = args.flags.send === true;
 const AS_JSON = args.flags.json === true;
-const MODEL = typeof args.flags.model === "string" ? args.flags.model : "gemini-2.5-flash";
 
 // ---- helpers ----
 
@@ -91,17 +89,6 @@ function yesterdayOf(ymd) {
   return ymdLocal(d);
 }
 const YESTERDAY = yesterdayOf(TODAY);
-
-function loadGeminiKey() {
-  try {
-    const raw = readFileSync(AUTH_PATH, "utf8");
-    const data = JSON.parse(raw);
-    const key = data?.profiles?.["google:default"]?.key;
-    return typeof key === "string" && key.length > 20 ? key : "";
-  } catch {
-    return "";
-  }
-}
 
 function resolveTarget() {
   if (typeof args.flags.target === "string" && args.flags.target.trim()) {
@@ -223,92 +210,36 @@ function buildPrompt({ claims, yesterdaySummary, todayLog, heartbeatMd }) {
 
 // ---- Gemini call with fallback chain ----
 
-async function callGeminiOnce(apiKey, model, prompt, timeoutMs) {
-  const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/" +
-    encodeURIComponent(model) +
-    ":generateContent?key=" +
-    encodeURIComponent(apiKey);
-  const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.5,
-      maxOutputTokens: 512,
-      ...(/^gemini-2\.5/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-    },
-  };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
+async function callClaudeCli(prompt) {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "claude",
+      ["-p", prompt, "--model", "sonnet", "--fallback-model", "opus", "--output-format", "text"],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => {
+      stdout += c.toString("utf8");
     });
-    if (!res.ok) {
-      return { ok: false, status: res.status, error: `http-${res.status}` };
-    }
-    const data = await res.json();
-    const parts = data?.candidates?.[0]?.content?.parts ?? [];
-    const raw = parts
-      .map((p) => (typeof p?.text === "string" ? p.text : ""))
-      .join("")
-      .trim();
-    if (!raw) {
-      return { ok: false, status: 200, error: "empty-response" };
-    }
-    return { ok: true, text: raw };
-  } catch (err) {
-    const name =
-      err?.name === "AbortError" ? "timeout" : (err?.message ?? "fetch-error").slice(0, 48);
-    return { ok: false, status: 0, error: name };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callGeminiWithFallback(apiKey, prompt) {
-  const chain = dedupe([MODEL, "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"]);
-  let lastError = "unknown";
-  for (const model of chain) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const r = await callGeminiOnce(apiKey, model, prompt, 15000);
-      if (r.ok) {
-        return { text: r.text, modelUsed: model };
+    child.stderr.on("data", (c) => {
+      stderr += c.toString("utf8");
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`claude CLI exited ${code}: ${stderr.slice(0, 400) || "(no stderr)"}`));
+        return;
       }
-      lastError = r.error;
-      const transient =
-        r.status === 429 ||
-        r.status === 500 ||
-        r.status === 502 ||
-        r.status === 503 ||
-        r.status === 504 ||
-        r.status === 0;
-      if (!transient) {
-        break;
+      const text = stdout.trim();
+      if (!text) {
+        reject(new Error("claude CLI produced empty output"));
+        return;
       }
-      await sleep(1500 * Math.pow(2, attempt) + Math.floor(Math.random() * 500));
-    }
-  }
-  throw new Error(`gemini fallback chain exhausted: ${lastError}`);
-}
-
-function dedupe(list) {
-  const seen = new Set();
-  const out = [];
-  for (const item of list) {
-    if (seen.has(item)) {
-      continue;
-    }
-    seen.add(item);
-    out.push(item);
-  }
-  return out;
+      resolve({ text, modelUsed: "claude-cli/sonnet" });
+    });
+    child.on("error", (err) => reject(err));
+  });
 }
 
 // ---- Telegram send via openclaw CLI ----
@@ -361,12 +292,6 @@ function sendViaOpenClawCli(target, message) {
 // ---- main ----
 
 async function main() {
-  const apiKey = loadGeminiKey();
-  if (!apiKey) {
-    console.error("[morning-brief] missing Gemini API key at", AUTH_PATH);
-    process.exitCode = 1;
-    return;
-  }
   const target = resolveTarget();
   if (SEND && !target) {
     console.error(
@@ -383,7 +308,10 @@ async function main() {
 
   const prompt = buildPrompt({ claims, yesterdaySummary, todayLog, heartbeatMd });
   const started = Date.now();
-  const { text: brief, modelUsed } = await callGeminiWithFallback(apiKey, prompt);
+  // Route through Claude Max (Sonnet primary, Opus fallback) — Joseph's
+  // Google prepayment is depleted so the old Gemini REST path 429s, and
+  // Max covers sonnet+opus unlimited via the claude CLI.
+  const { text: brief, modelUsed } = await callClaudeCli(prompt);
   const latencyMs = Date.now() - started;
 
   if (AS_JSON) {

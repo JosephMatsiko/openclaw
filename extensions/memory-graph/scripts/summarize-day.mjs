@@ -66,7 +66,6 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 
 const HOME = homedir();
-const AUTH_PATH = join(HOME, ".openclaw", "agents", "main", "agent", "auth-profiles.json");
 const DB_PATH = join(HOME, ".openclaw", "memory", "graph.sqlite");
 const WORKSPACE_MEMORY = join(HOME, ".openclaw", "workspace", "memory");
 const SUMMARIES_DIR = join(WORKSPACE_MEMORY, "summaries");
@@ -85,13 +84,7 @@ function resolveDate() {
   return ymdLocal(base);
 }
 
-const MODEL = typeof args.model === "string" ? args.model : "gemini-2.5-flash";
-// Model chain for 503/429 fallback. The primary is MODEL; if it is already
-// in this list we keep its position, otherwise we prepend.
-const FALLBACK_CHAIN = dedupe(
-  [MODEL, "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"].filter(Boolean),
-);
-const MAX_RETRIES = toInt(args.retries, 3);
+const MODEL = typeof args.model === "string" ? args.model : "claude-cli/sonnet";
 const PRUNE = args.prune === true;
 const DATE = resolveDate();
 const SCOPE = typeof args.scope === "string" ? args.scope : "workspace";
@@ -122,8 +115,6 @@ async function main() {
   );
   log(`model=${MODEL} prune=${PRUNE} scope=${SCOPE}:${SCOPE_ID}`);
 
-  const apiKey = loadApiKey();
-
   const db = openDb(DB_PATH);
   try {
     const threads = loadThreads(db, { startMs, endMs, limit: MAX_THREADS });
@@ -142,8 +133,8 @@ async function main() {
     log(`prompt size ~${approxKb(prompt)}KB`);
 
     const started = Date.now();
-    const { text: summary, modelUsed } = await callGeminiWithFallback(apiKey, prompt);
-    log(`gemini ${modelUsed} replied in ${Date.now() - started}ms`);
+    const { text: summary, modelUsed } = await callClaudeCli(prompt);
+    log(`${modelUsed} replied in ${Date.now() - started}ms`);
 
     const frontmatter = buildFrontmatter({
       date: DATE,
@@ -200,24 +191,6 @@ function localDayWindow(ymd) {
   const startMs = start.getTime();
   const endMs = startMs + 24 * 60 * 60 * 1000;
   return { startMs, endMs };
-}
-
-function loadApiKey() {
-  let raw;
-  try {
-    raw = readFileSync(AUTH_PATH, "utf8");
-  } catch (err) {
-    throw new Error(
-      `cannot read auth-profiles at ${relativeToHome(AUTH_PATH)}: ${err?.message ?? err}`,
-      { cause: err },
-    );
-  }
-  const data = JSON.parse(raw);
-  const key = data?.profiles?.["google:default"]?.key;
-  if (typeof key !== "string" || key.length < 20) {
-    throw new Error(`profiles["google:default"].key missing from ${relativeToHome(AUTH_PATH)}`);
-  }
-  return key;
 }
 
 function openDb(path) {
@@ -369,143 +342,43 @@ function buildPrompt({ date, threads, claims, dailyLog }) {
   return lines.join("\n");
 }
 
-async function callGeminiWithFallback(apiKey, prompt) {
-  const errors = [];
-  for (const model of FALLBACK_CHAIN) {
-    try {
-      const text = await callGeminiWithRetries(apiKey, model, prompt);
-      return { text, modelUsed: model };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${model}: ${msg}`);
-      // Non-retryable errors (auth, 400, etc.) should not cascade. Only try
-      // the next model on "overloaded / transient" failures.
-      if (!isTransientError(err)) {
-        throw new Error(`Gemini ${model} failed (non-transient): ${msg}`, { cause: err });
-      }
-      log(`fallback: ${model} still failing after retries, trying next model`);
-    }
-  }
-  throw new Error(`all Gemini models in fallback chain failed: ${errors.join(" | ")}`);
-}
-
-async function callGeminiWithRetries(apiKey, model, prompt) {
-  let lastErr;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    try {
-      return await callGemini(apiKey, model, prompt);
-    } catch (err) {
-      lastErr = err;
-      if (!isTransientError(err) || attempt === MAX_RETRIES) {
-        throw err;
-      }
-      const backoffMs = 750 * Math.pow(2, attempt) + Math.floor(Math.random() * 250);
-      log(
-        `${model} attempt ${attempt + 1}/${MAX_RETRIES + 1} failed (${shortErr(err)}), retrying in ${backoffMs}ms`,
-      );
-      await sleep(backoffMs);
-    }
-  }
-  throw lastErr;
-}
-
-async function callGemini(apiKey, model, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  // Gemini 2.5 models default to "thinking" mode where reasoning tokens are
-  // also billed against maxOutputTokens. For a structured summarization task
-  // like this one we want every output token to be final prose, so we clamp
-  // thinkingBudget to 0 for 2.5 models. (The field is silently ignored on
-  // older/non-2.5 models, so this is safe.)
-  const is25 = /^gemini-2\.5/i.test(model);
-
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: prompt }],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.2,
-      topP: 0.95,
-      maxOutputTokens: 8192,
-      ...(is25 ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-    },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const err = new Error(`Gemini HTTP ${res.status}: ${text.slice(0, 800)}`);
-    err.status = res.status;
-    throw err;
-  }
-  const data = await res.json();
-  const candidate = data?.candidates?.[0];
-  const parts = candidate?.content?.parts;
-  if (!Array.isArray(parts) || parts.length === 0) {
-    throw new Error(`Gemini returned no content parts: ${JSON.stringify(data).slice(0, 800)}`);
-  }
-  const text = parts
-    .map((p) => (typeof p?.text === "string" ? p.text : ""))
-    .join("")
-    .trim();
-  if (!text) {
-    throw new Error("Gemini returned empty text");
-  }
-  const finishReason = candidate?.finishReason ?? "unknown";
-  const usage = data?.usageMetadata ?? {};
-  if (finishReason !== "STOP") {
-    log(
-      `warning: finishReason=${finishReason} (usage: prompt=${usage.promptTokenCount ?? "?"} output=${usage.candidatesTokenCount ?? "?"} thoughts=${usage.thoughtsTokenCount ?? 0}) — output may be truncated`,
+// Replacement path: spawn the `claude` CLI which runs under Joseph's Max
+// plan (unlimited, no API key, no 429s). Sonnet primary with Opus as the
+// overload fallback — matches his "Sonnet + Opus only" preference. The
+// Gemini helpers below are kept for rollback / local debugging but are no
+// longer reachable from main().
+async function callClaudeCli(prompt) {
+  const { spawn } = await import("node:child_process");
+  const model = "sonnet";
+  const fallback = "opus";
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "claude",
+      ["-p", prompt, "--model", model, "--fallback-model", fallback, "--output-format", "text"],
+      { stdio: ["ignore", "pipe", "pipe"] },
     );
-  }
-  return text;
-}
-
-function isTransientError(err) {
-  if (!err) {
-    return false;
-  }
-  const status = err.status;
-  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
-    return true;
-  }
-  const msg = err instanceof Error ? err.message : String(err);
-  return /UNAVAILABLE|overload|high demand|timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(msg);
-}
-
-function shortErr(err) {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.replace(/\s+/g, " ").slice(0, 160);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function dedupe(list) {
-  const seen = new Set();
-  const out = [];
-  for (const item of list) {
-    if (seen.has(item)) {
-      continue;
-    }
-    seen.add(item);
-    out.push(item);
-  }
-  return out;
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`claude CLI exited ${code}: ${stderr.slice(0, 400) || "(no stderr)"}`));
+        return;
+      }
+      const text = stdout.trim();
+      if (!text) {
+        reject(new Error("claude CLI produced empty output"));
+        return;
+      }
+      resolve({ text, modelUsed: `claude-cli/${model}` });
+    });
+    child.on("error", (err) => reject(err));
+  });
 }
 
 function buildFrontmatter({

@@ -24,31 +24,6 @@
 //   --json            JSON output (verdict + answer + metadata).
 //   -h, --help        Print this help.
 
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-const AUTH_PROFILES_PATH = join(
-  homedir(),
-  ".openclaw",
-  "agents",
-  "main",
-  "agent",
-  "auth-profiles.json",
-);
-
-function loadGeminiKey() {
-  try {
-    const raw = readFileSync(AUTH_PROFILES_PATH, "utf8");
-    const data = JSON.parse(raw);
-    const key = data?.profiles?.["google:default"]?.key;
-    return typeof key === "string" && key.length > 20 ? key : "";
-  } catch {
-    return "";
-  }
-}
-
 // ---- classifier (same rules as orchestrator.ts / mcp-server / route CLI) ----
 
 const ROUTING_TIER_TO_MODEL = {
@@ -161,105 +136,53 @@ function normalizeTierLLM(raw) {
   return null;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callGeminiOnce(
-  text,
-  model,
-  apiKey,
-  { system = "", isClassifier = false, timeoutMs = 15000 } = {},
-) {
-  const maxOutputTokens = isClassifier ? 32 : 1024;
-  const temperature = isClassifier ? 0 : 0.4;
-  const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/" +
-    encodeURIComponent(model) +
-    ":generateContent?key=" +
-    encodeURIComponent(apiKey);
-  const prompt = isClassifier ? buildClassifierPrompt(text) : text.trim();
-  const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature,
-      maxOutputTokens,
-      ...(/^gemini-2\.5/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-    },
-  };
-  if (!isClassifier && system && system.trim()) {
-    body.systemInstruction = { parts: [{ text: system.trim() }] };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      return { ok: false, status: res.status, error: `http-${res.status}` };
-    }
-    const data = await res.json();
-    const parts = data?.candidates?.[0]?.content?.parts ?? [];
-    const raw = parts
-      .map((p) => (typeof p?.text === "string" ? p.text : ""))
-      .join("")
-      .trim();
-    if (!raw) {
-      return { ok: false, status: 200, error: "empty-response" };
-    }
-    return { ok: true, text: raw };
-  } catch (err) {
-    const reason =
-      err?.name === "AbortError" ? "timeout" : (err?.message ?? "fetch-error").slice(0, 48);
-    return { ok: false, status: 0, error: reason };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Retry transient failures (429 / 5xx / network) with exponential backoff.
-// Flash free tier has a low RPM cap; a busy user running back-to-back calls
-// needs this to not see spurious "answer call failed" errors.
-async function callGemini(text, model, apiKey, opts = {}) {
-  const maxRetries = opts.maxRetries ?? 4;
-  let lastError = "unknown";
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const r = await callGeminiOnce(text, model, apiKey, opts);
-    if (r.ok) {
-      return { text: r.text };
-    }
-    lastError = r.error;
-    const isTransient =
-      r.status === 429 ||
-      r.status === 500 ||
-      r.status === 502 ||
-      r.status === 503 ||
-      r.status === 504 ||
-      r.status === 0;
-    if (!isTransient || attempt === maxRetries) {
-      break;
-    }
-    const backoffMs = 1500 * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
-    process.stderr.write(
-      `[orchestrator-answer] ${model} ${r.error}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries + 1})\n`,
+// Route Layer-5 classifier + answer-router through Claude Max (Sonnet
+// primary, Opus fallback on overload). Joseph's Google prepayment is
+// depleted so Gemini 2.5 Flash 429s; Max covers sonnet+opus unlimited.
+// The classifier path prepends buildClassifierPrompt; the answer path
+// uses the user text (optionally with a system prompt prefix since
+// claude CLI doesn't take a separate system instruction via -p).
+async function callClaudeCli(text, { system = "", isClassifier = false } = {}) {
+  const { spawn } = await import("node:child_process");
+  const prompt = isClassifier
+    ? buildClassifierPrompt(text)
+    : system && system.trim()
+      ? `${system.trim()}\n\n${text.trim()}`
+      : text.trim();
+  return new Promise((resolve) => {
+    const child = spawn(
+      "claude",
+      ["-p", prompt, "--model", "sonnet", "--fallback-model", "opus", "--output-format", "text"],
+      { stdio: ["ignore", "pipe", "pipe"] },
     );
-    await sleep(backoffMs);
-  }
-  return { text: null, error: lastError };
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => {
+      stdout += c.toString("utf8");
+    });
+    child.stderr.on("data", (c) => {
+      stderr += c.toString("utf8");
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        resolve({ text: null, error: `claude-cli-exit-${code}-${stderr.slice(0, 60)}` });
+        return;
+      }
+      const out = stdout.trim();
+      if (!out) {
+        resolve({ text: null, error: "claude-cli-empty" });
+        return;
+      }
+      resolve({ text: out });
+    });
+    child.on("error", (err) => {
+      resolve({ text: null, error: err instanceof Error ? err.message : String(err) });
+    });
+  });
 }
 
-async function classifyByLLM(text, apiKey) {
-  if (!apiKey) {
-    return verdict("complex", "LLM fallback failed (no-api-key)", 0.5, [
-      "llm-fallback-failed",
-      "no-api-key",
-    ]);
-  }
-  const r = await callGemini(text, "gemini-2.5-flash", apiKey, { isClassifier: true });
+async function classifyByLLM(text) {
+  const r = await callClaudeCli(text, { isClassifier: true });
   if (r.text === null) {
     return verdict("complex", `LLM fallback failed (${r.error})`, 0.5, [
       "llm-fallback-failed",
@@ -380,27 +303,23 @@ async function main() {
   const classifyOpts = { lastAssistantEndedInQuestion: flags.lastQ === true };
   let v = classify(text, classifyOpts);
   if (!v) {
-    const apiKey = loadGeminiKey();
-    v = await classifyByLLM(text, apiKey);
+    v = await classifyByLLM(text);
   }
 
   const started = Date.now();
 
   if (v.tier === "trivial" || v.tier === "contextual") {
-    const apiKey = loadGeminiKey();
-    if (!apiKey) {
-      process.stderr.write(`[orchestrator-answer] no Gemini API key — cannot answer\n`);
-      process.exitCode = 1;
-      return;
-    }
-    const model = v.tier === "trivial" ? "gemini-2.5-flash" : "gemini-2.5-pro";
-    const r = await callGemini(text, model, apiKey, { system: flags.system ?? "" });
+    // Both tiers through Claude Max now. Sonnet primary, Opus fallback —
+    // Joseph's preference: Sonnet + Opus only, no Haiku. claude CLI
+    // handles the fallback internally on overload.
+    const r = await callClaudeCli(text, { system: flags.system ?? "" });
     const latencyMs = Date.now() - started;
     if (r.text === null) {
       process.stderr.write(`[orchestrator-answer] answer call failed: ${r.error}\n`);
       process.exitCode = 1;
       return;
     }
+    const model = "claude-cli/sonnet";
     process.stderr.write(
       `[orchestrator-answer] ${v.tier.toUpperCase()} via ${model} (${latencyMs}ms)\n`,
     );
