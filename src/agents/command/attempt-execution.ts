@@ -7,6 +7,7 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import { sanitizeForLog } from "../../terminal/ansi.js";
 import { resolveMessageChannel } from "../../utils/message-channel.js";
@@ -15,6 +16,10 @@ import { runCliAgent } from "../cli-runner.js";
 import { clearCliSession, getCliSessionBinding, setCliSessionBinding } from "../cli-session.js";
 import { FailoverError } from "../failover-error.js";
 import { isCliProvider } from "../model-selection.js";
+import {
+  buildBeforeModelResolveAttachments,
+  resolveHookModelSelection,
+} from "../pi-embedded-runner/run/setup.js";
 import { prepareSessionManagerForRun } from "../pi-embedded-runner/session-manager-init.js";
 import { runEmbeddedPiAgent, type EmbeddedPiRunResult } from "../pi-embedded.js";
 import { buildWorkspaceSkillSnapshot } from "../skills.js";
@@ -214,7 +219,7 @@ export async function persistCliTurnTranscript(params: {
   });
 }
 
-export function runAgentAttempt(params: {
+export async function runAgentAttempt(params: {
   providerOverride: string;
   modelOverride: string;
   cfg: OpenClawConfig;
@@ -253,12 +258,54 @@ export function runAgentAttempt(params: {
   );
   const bootstrapPromptWarningSignature =
     bootstrapPromptWarningSignaturesSeen[bootstrapPromptWarningSignaturesSeen.length - 1];
+  // Phase 3d — run plugin `before_model_resolve` hooks BEFORE the
+  // CLI-vs-embedded dispatch decision. Lets memory-graph (and any other
+  // plugin registering this hook) steer the turn's provider/model even
+  // when the caller's primary is a claude-cli/* model. When the hook
+  // returns no override, effectiveProvider/Model equal the caller's
+  // request, so existing behavior is preserved.
+  //
+  // Auth profile lookup stays keyed on the ORIGINAL request: if the hook
+  // swaps provider away from claude-cli, the claude-cli auth profile
+  // doesn't apply, so we drop the authProfileId override entirely and
+  // let the new provider resolve its own auth downstream.
+  let effectiveProvider = params.providerOverride;
+  let effectiveModel = params.modelOverride;
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("before_model_resolve")) {
+    try {
+      const attachments = buildBeforeModelResolveAttachments(params.opts.images);
+      const hookSelection = await resolveHookModelSelection({
+        prompt: effectivePrompt,
+        ...(attachments ? { attachments } : {}),
+        provider: effectiveProvider,
+        modelId: effectiveModel,
+        hookRunner,
+        hookContext: {
+          agentId: params.sessionAgentId,
+          sessionKey: params.sessionKey,
+          sessionId: params.sessionId,
+          workspaceDir: params.workspaceDir,
+          messageProvider: params.messageChannel,
+          trigger: "user",
+          channelId: params.messageChannel,
+        },
+      });
+      effectiveProvider = hookSelection.provider;
+      effectiveModel = hookSelection.modelId;
+    } catch (err) {
+      log.warn(
+        `before_model_resolve hook failed in attempt-execution; using caller's primary: ${String(err)}`,
+      );
+    }
+  }
+  const providerSwitched = effectiveProvider !== params.providerOverride;
   const authProfileId =
-    params.providerOverride === params.authProfileProvider
+    !providerSwitched && params.providerOverride === params.authProfileProvider
       ? params.sessionEntry?.authProfileOverride
       : undefined;
-  if (isCliProvider(params.providerOverride, params.cfg)) {
-    const cliSessionBinding = getCliSessionBinding(params.sessionEntry, params.providerOverride);
+  if (isCliProvider(effectiveProvider, params.cfg)) {
+    const cliSessionBinding = getCliSessionBinding(params.sessionEntry, effectiveProvider);
     const runCliWithSession = (nextCliSessionId: string | undefined) =>
       runCliAgent({
         sessionId: params.sessionId,
@@ -268,8 +315,8 @@ export function runAgentAttempt(params: {
         workspaceDir: params.workspaceDir,
         config: params.cfg,
         prompt: effectivePrompt,
-        provider: params.providerOverride,
-        model: params.modelOverride,
+        provider: effectiveProvider,
+        model: effectiveModel,
         thinkLevel: params.resolvedThinkLevel,
         timeoutMs: params.timeoutMs,
         runId: params.runId,
@@ -298,13 +345,13 @@ export function runAgentAttempt(params: {
         params.storePath
       ) {
         log.warn(
-          `CLI session expired, clearing from session store: provider=${sanitizeForLog(params.providerOverride)} sessionKey=${params.sessionKey}`,
+          `CLI session expired, clearing from session store: provider=${sanitizeForLog(effectiveProvider)} sessionKey=${params.sessionKey}`,
         );
 
         const entry = params.sessionStore[params.sessionKey];
         if (entry) {
           const updatedEntry = { ...entry };
-          clearCliSession(updatedEntry, params.providerOverride);
+          clearCliSession(updatedEntry, effectiveProvider);
           updatedEntry.updatedAt = Date.now();
 
           await persistSessionEntry({
@@ -376,8 +423,8 @@ export function runAgentAttempt(params: {
     images: params.isFallbackRetry ? undefined : params.opts.images,
     imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
     clientTools: params.opts.clientTools,
-    provider: params.providerOverride,
-    model: params.modelOverride,
+    provider: effectiveProvider,
+    model: effectiveModel,
     authProfileId,
     authProfileIdSource: authProfileId ? params.sessionEntry?.authProfileOverrideSource : undefined,
     thinkLevel: params.resolvedThinkLevel,
