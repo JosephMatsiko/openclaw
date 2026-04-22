@@ -43,6 +43,22 @@ export const CRITICAL_TOOL_NAMES: readonly string[] = [
   // memory-graph's bulk ingest — writes many nodes; safe in autonomous,
   // worth confirming in assisted on an install where storage is expensive.
   "memory_ingest_claude_code",
+  // apple-toolkit — sends an iMessage from the operator's Apple ID to
+  // an arbitrary recipient. Classic prompt-injection-actionable.
+  "messages_send",
+  // apple-toolkit — writes a new Apple Note. Not destructive but it's a
+  // content side effect on a surface that holds prayer requests, pastoral
+  // content, and other private writing. Worth a gate by default.
+  "notes_create",
+  // apple-toolkit — adds a reminder to the operator's list. Not usually
+  // destructive but a prompt-driven spam-the-user vector if compromised.
+  "reminders_add",
+  // apple-toolkit — open a URL in the default browser. Low-severity
+  // individually, but can be chained with injected phishing URLs, so
+  // gate in assisted mode.
+  "open_url",
+  // apple-toolkit — open a named .app. Same rationale as open_url.
+  "mac_app_open",
 ];
 
 export function isCriticalTool(toolName: string): boolean {

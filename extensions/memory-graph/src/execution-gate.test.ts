@@ -19,10 +19,17 @@ function logger() {
 
 describe("execution-gate isCriticalTool", () => {
   test("recognizes the registered critical tool set", () => {
+    // memory-graph writers
     expect(isCriticalTool("memory_set_persona")).toBe(true);
     expect(isCriticalTool("memory_forget")).toBe(true);
     expect(isCriticalTool("memory_consolidate")).toBe(true);
     expect(isCriticalTool("memory_ingest_claude_code")).toBe(true);
+    // apple-toolkit surfaces (Mac-native side effects)
+    expect(isCriticalTool("messages_send")).toBe(true);
+    expect(isCriticalTool("notes_create")).toBe(true);
+    expect(isCriticalTool("reminders_add")).toBe(true);
+    expect(isCriticalTool("open_url")).toBe(true);
+    expect(isCriticalTool("mac_app_open")).toBe(true);
   });
 
   test("non-critical tools return false", () => {
