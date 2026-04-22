@@ -36,6 +36,10 @@ export type GraphNodeSource = {
   sessionKey?: string;
   entryId?: string;
   surface?: GraphNodeSurface;
+  // Free-form provenance tag for bulk-purgeable cohorts (smoke tests, evals,
+  // backfills). Real user data leaves this undefined/null. Bulk-purge with
+  // `scripts/memory-purge-by-label.mjs --label <name>`.
+  originLabel?: string;
 };
 
 export type GraphNode = {

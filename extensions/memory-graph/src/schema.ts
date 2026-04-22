@@ -3,7 +3,7 @@
 // Revisions land here as new migrations; the storage layer applies them in
 // order at open time and records the applied version in `schema_version`.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const MIGRATIONS: readonly string[] = [
   // v1: nodes + edges + metadata.
@@ -90,5 +90,14 @@ export const MIGRATIONS: readonly string[] = [
    WHERE kind = 'thread'
      AND source_surface = 'claude-code'
      AND source_session_id LIKE 'cc:%';
+  `,
+  // v5: origin_label — free-form tag for bulk-purgeable cohorts. Smoke-test
+  // runners, evaluation harnesses, and one-off backfills set
+  // process.env.OPENCLAW_MEMORY_ORIGIN_LABEL (or pass source.originLabel on
+  // the write input) so the classifier's output can be distinguished from
+  // real user claims after the fact. Default is NULL = real user data.
+  `
+  ALTER TABLE nodes ADD COLUMN origin_label TEXT;
+  CREATE INDEX IF NOT EXISTS nodes_origin_label_idx ON nodes (origin_label);
   `,
 ];

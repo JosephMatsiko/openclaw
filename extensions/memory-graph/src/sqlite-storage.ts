@@ -35,6 +35,7 @@ type NodeRow = {
   source_session_key: string | null;
   source_entry_id: string | null;
   source_surface: string | null;
+  origin_label: string | null;
   embedding: Uint8Array | null;
   embedding_model: string | null;
 };
@@ -52,7 +53,7 @@ type EdgeRow = {
 function rowToNode(row: NodeRow): GraphNode {
   const hasSessionSource = row.source_session_id !== null;
   const source =
-    hasSessionSource || row.source_surface !== null
+    hasSessionSource || row.source_surface !== null || row.origin_label !== null
       ? {
           sessionId: row.source_session_id ?? "",
           ...(row.source_session_key !== null ? { sessionKey: row.source_session_key } : {}),
@@ -66,6 +67,7 @@ function rowToNode(row: NodeRow): GraphNode {
                   : never,
               }
             : {}),
+          ...(row.origin_label !== null ? { originLabel: row.origin_label } : {}),
         }
       : undefined;
   return {
@@ -80,6 +82,20 @@ function rowToNode(row: NodeRow): GraphNode {
     updatedAt: row.updated_at,
     ...(source ? { source } : {}),
   };
+}
+
+// Pull a default origin_label from the environment when the caller does not
+// set one explicitly. Smoke-test runners and eval harnesses launch with
+// OPENCLAW_MEMORY_ORIGIN_LABEL=<cohort> and every node written during that
+// process inherits the label, which makes after-the-fact bulk purges possible
+// without having to diff against real user data.
+function envOriginLabel(): string | null {
+  const raw = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function rowToEdge(row: EdgeRow): GraphEdge {
@@ -181,6 +197,10 @@ export class SqliteGraphStorage implements GraphStorage {
       | undefined;
 
     const source = input.source;
+    // Caller-supplied label wins; env-var default is the fallback. Preserving
+    // any existing stored label on upsert (when neither is supplied) avoids
+    // accidentally erasing cohort provenance on a re-classify.
+    const originLabel = source?.originLabel ?? envOriginLabel() ?? existing?.origin_label ?? null;
     if (existing) {
       this.db
         .prepare(
@@ -188,7 +208,7 @@ export class SqliteGraphStorage implements GraphStorage {
              SET kind = ?, summary = ?, body = ?, scope = ?, scope_id = ?,
                  confidence = ?, updated_at = ?,
                  source_session_id = ?, source_session_key = ?, source_entry_id = ?,
-                 source_surface = ?
+                 source_surface = ?, origin_label = ?
            WHERE id = ?`,
         )
         .run(
@@ -203,6 +223,7 @@ export class SqliteGraphStorage implements GraphStorage {
           source?.sessionKey ?? null,
           source?.entryId ?? null,
           source?.surface ?? null,
+          originLabel,
           id,
         );
       const updated = this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow;
@@ -215,8 +236,8 @@ export class SqliteGraphStorage implements GraphStorage {
            (id, kind, summary, body, scope, scope_id, confidence,
             created_at, updated_at,
             source_session_id, source_session_key, source_entry_id,
-            source_surface)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            source_surface, origin_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -232,6 +253,7 @@ export class SqliteGraphStorage implements GraphStorage {
         source?.sessionKey ?? null,
         source?.entryId ?? null,
         source?.surface ?? null,
+        originLabel,
       );
     const inserted = this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow;
     return { node: rowToNode(inserted), created: true };

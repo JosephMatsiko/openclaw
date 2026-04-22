@@ -66,7 +66,7 @@ const NODE_KINDS = /** @type {const} */ ([
 const RAW_CONVERSATION_KINDS = new Set(["thread", "thread_archive"]);
 const INJECTION_KINDS = NODE_KINDS.filter((k) => !RAW_CONVERSATION_KINDS.has(k));
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const MIGRATIONS = [
   // v1: nodes + edges + metadata.
@@ -129,6 +129,16 @@ const MIGRATIONS = [
    WHERE kind = 'thread'
      AND source_surface = 'claude-code'
      AND source_session_id LIKE 'cc:%';
+  `,
+  // v5: origin_label — free-form cohort tag for bulk-purgeable writes.
+  // Smoke-test runners, evaluation harnesses, and one-off backfills set
+  // process.env.OPENCLAW_MEMORY_ORIGIN_LABEL and every node written during
+  // that process inherits the label so after-the-fact cleanup via
+  // scripts/memory-purge-by-label.mjs does not need hand-picked ids.
+  // Keep in sync with src/schema.ts.
+  `
+  ALTER TABLE nodes ADD COLUMN origin_label TEXT;
+  CREATE INDEX IF NOT EXISTS nodes_origin_label_idx ON nodes (origin_label);
   `,
 ];
 
@@ -686,14 +696,28 @@ function deterministicId(kind, summary) {
   return `${kind}-${h.slice(0, 16)}`;
 }
 
+// Env-var default for origin_label. See src/sqlite-storage.ts for the canonical
+// implementation; kept in sync here because mcp-server.mjs is the standalone
+// path (Claude Code, Claude Desktop) that bypasses the TS storage layer.
+function envOriginLabel() {
+  const raw = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function rowToNode(row) {
-  const hasAnySourceInfo = row.source_session_id || row.source_surface || row.source_entry_id;
+  const hasAnySourceInfo =
+    row.source_session_id || row.source_surface || row.source_entry_id || row.origin_label;
   const source = hasAnySourceInfo
     ? {
         sessionId: row.source_session_id ?? "",
         ...(row.source_session_key ? { sessionKey: row.source_session_key } : {}),
         ...(row.source_entry_id ? { entryId: row.source_entry_id } : {}),
         ...(row.source_surface ? { surface: row.source_surface } : {}),
+        ...(row.origin_label ? { originLabel: row.origin_label } : {}),
       }
     : undefined;
   return {
@@ -761,18 +785,24 @@ function store({ summary, kind, body, confidence } = {}) {
   const id = deterministicId(normalizedKind, trimmed);
   const now = Date.now();
   const existing = db.prepare("SELECT * FROM nodes WHERE id = ?").get(id);
+  // Pull origin_label from OPENCLAW_MEMORY_ORIGIN_LABEL so smoke-test and
+  // eval runs can tag every node they store without threading an extra
+  // argument through the MCP surface. On upsert, COALESCE preserves an
+  // already-stored label when none is supplied this call.
+  const effectiveOriginLabel = envOriginLabel();
   if (existing) {
     db.prepare(
       `UPDATE nodes
-          SET summary = ?, body = ?, confidence = ?, updated_at = ?
+          SET summary = ?, body = ?, confidence = ?, updated_at = ?,
+              origin_label = COALESCE(?, origin_label)
         WHERE id = ?`,
-    ).run(trimmed, body ?? null, normalizedConfidence, now, id);
+    ).run(trimmed, body ?? null, normalizedConfidence, now, effectiveOriginLabel, id);
   } else {
     db.prepare(
       `INSERT INTO nodes
          (id, kind, summary, body, scope, scope_id, confidence,
-          created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at, updated_at, origin_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       normalizedKind,
@@ -783,6 +813,7 @@ function store({ summary, kind, body, confidence } = {}) {
       normalizedConfidence,
       now,
       now,
+      effectiveOriginLabel,
     );
   }
   return rowToNode(db.prepare("SELECT * FROM nodes WHERE id = ?").get(id));
@@ -954,11 +985,15 @@ function persistNode({ kind, summary, body, confidence, source, surface }) {
   const existing = db.prepare("SELECT id FROM nodes WHERE id = ?").get(id);
   const bodyStored = body ? body.slice(0, 4000) : null;
   const effectiveSurface = surface ?? source?.surface ?? null;
+  // Caller-supplied label wins; env-var default is the fallback; an existing
+  // stored label on upsert is preserved via COALESCE in the UPDATE path.
+  const effectiveOriginLabel = source?.originLabel ?? envOriginLabel() ?? null;
   if (existing) {
     db.prepare(
       `UPDATE nodes SET body = ?, updated_at = ?,
           source_session_id = COALESCE(?, source_session_id),
           source_surface = COALESCE(?, source_surface),
+          origin_label = COALESCE(?, origin_label),
           confidence = MAX(?, confidence)
         WHERE id = ?`,
     ).run(
@@ -966,6 +1001,7 @@ function persistNode({ kind, summary, body, confidence, source, surface }) {
       now,
       source?.sessionId ?? null,
       effectiveSurface,
+      effectiveOriginLabel,
       Number.isFinite(confidence) ? confidence : 0,
       id,
     );
@@ -975,8 +1011,8 @@ function persistNode({ kind, summary, body, confidence, source, surface }) {
          (id, kind, summary, body, scope, scope_id, confidence,
           created_at, updated_at,
           source_session_id, source_session_key, source_entry_id,
-          source_surface)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          source_surface, origin_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       kind,
@@ -991,6 +1027,7 @@ function persistNode({ kind, summary, body, confidence, source, surface }) {
       null,
       source?.entryId ?? null,
       effectiveSurface,
+      effectiveOriginLabel,
     );
   }
   return id;

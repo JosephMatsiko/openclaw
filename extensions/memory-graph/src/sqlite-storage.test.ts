@@ -284,4 +284,138 @@ describe("SqliteGraphStorage", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  describe("origin_label cohort tagging", () => {
+    test("explicit source.originLabel persists through write + read", async () => {
+      const store = newStore();
+      const res = await store.writeNode({
+        kind: "fact",
+        summary: "smoke-1",
+        scope: "workspace",
+        scopeId: "default",
+        confidence: 0.98,
+        source: { sessionId: "s-1", originLabel: "smoke-2026-04-21" },
+      });
+      expect(res.node.source?.originLabel).toBe("smoke-2026-04-21");
+      const fetched = await store.getNode(res.node.id);
+      expect(fetched?.source?.originLabel).toBe("smoke-2026-04-21");
+      await store.close();
+    });
+
+    test("env var OPENCLAW_MEMORY_ORIGIN_LABEL is the fallback default", async () => {
+      const prior = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+      process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = "eval-run-7";
+      try {
+        const store = newStore();
+        const res = await store.writeNode({
+          kind: "fact",
+          summary: "env default",
+          scope: "workspace",
+          scopeId: "default",
+          confidence: 0.9,
+        });
+        expect(res.node.source?.originLabel).toBe("eval-run-7");
+        await store.close();
+      } finally {
+        if (prior === undefined) {
+          delete process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+        } else {
+          process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = prior;
+        }
+      }
+    });
+
+    test("explicit source overrides env-var default", async () => {
+      const prior = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+      process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = "env-label";
+      try {
+        const store = newStore();
+        const res = await store.writeNode({
+          kind: "fact",
+          summary: "explicit wins",
+          scope: "workspace",
+          scopeId: "default",
+          confidence: 0.9,
+          source: { sessionId: "s-1", originLabel: "explicit-label" },
+        });
+        expect(res.node.source?.originLabel).toBe("explicit-label");
+        await store.close();
+      } finally {
+        if (prior === undefined) {
+          delete process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+        } else {
+          process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = prior;
+        }
+      }
+    });
+
+    test("no source + no env = null label (real user data path)", async () => {
+      const prior = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+      delete process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+      try {
+        const store = newStore();
+        const res = await store.writeNode({
+          kind: "fact",
+          summary: "real user claim",
+          scope: "workspace",
+          scopeId: "default",
+          confidence: 0.9,
+        });
+        expect(res.node.source?.originLabel).toBeUndefined();
+        await store.close();
+      } finally {
+        if (prior !== undefined) {
+          process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = prior;
+        }
+      }
+    });
+
+    test("upsert without label preserves existing stored label", async () => {
+      const store = newStore();
+      const first = await store.writeNode({
+        id: "fixed",
+        kind: "fact",
+        summary: "v1",
+        scope: "workspace",
+        scopeId: "default",
+        confidence: 0.9,
+        source: { sessionId: "s-1", originLabel: "smoke" },
+      });
+      expect(first.node.source?.originLabel).toBe("smoke");
+      // Re-classification without label supplied should not erase the tag.
+      const second = await store.writeNode({
+        id: "fixed",
+        kind: "fact",
+        summary: "v2",
+        scope: "workspace",
+        scopeId: "default",
+        confidence: 0.95,
+      });
+      expect(second.node.source?.originLabel).toBe("smoke");
+      await store.close();
+    });
+
+    test("whitespace-only env var treated as absent", async () => {
+      const prior = process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+      process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = "   ";
+      try {
+        const store = newStore();
+        const res = await store.writeNode({
+          kind: "fact",
+          summary: "whitespace env",
+          scope: "workspace",
+          scopeId: "default",
+          confidence: 0.9,
+        });
+        expect(res.node.source?.originLabel).toBeUndefined();
+        await store.close();
+      } finally {
+        if (prior === undefined) {
+          delete process.env.OPENCLAW_MEMORY_ORIGIN_LABEL;
+        } else {
+          process.env.OPENCLAW_MEMORY_ORIGIN_LABEL = prior;
+        }
+      }
+    });
+  });
 });
