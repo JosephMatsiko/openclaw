@@ -91,8 +91,71 @@ function ensureDir() {
   }
 }
 
+// Populate composer with a throwaway character first — send/stop
+// buttons are often hidden until content exists. Empty-composer probes
+// would falsely flag these as regressions every week.
+async function primeComposerForProbe(tab, composerSelectors) {
+  const sels = JSON.stringify(composerSelectors);
+  await drv.evalInTab(
+    tab,
+    `
+    var sels = ${sels};
+    var c = null;
+    for (var i = 0; i < sels.length; i++) {
+      var el = document.querySelector(sels[i]);
+      if (el) { c = el; break; }
+    }
+    if (!c) return { primed: false };
+    c.focus();
+    if (c.tagName === 'TEXTAREA' || c.tagName === 'INPUT') {
+      var setter = Object.getOwnPropertyDescriptor(c.constructor.prototype, 'value') && Object.getOwnPropertyDescriptor(c.constructor.prototype, 'value').set;
+      if (setter) setter.call(c, 'probe');
+      else c.value = 'probe';
+      c.dispatchEvent(new Event('input', { bubbles: true }));
+    } else if (document.execCommand) {
+      document.execCommand('insertText', false, 'probe');
+    } else {
+      c.innerText = 'probe';
+      c.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'probe' }));
+    }
+    return { primed: true };
+  `,
+  );
+  await new Promise((r) => setTimeout(r, 400));
+}
+
+// Clear the composer so we leave no residue in Joseph's chat history.
+async function clearComposer(tab, composerSelectors) {
+  const sels = JSON.stringify(composerSelectors);
+  await drv.evalInTab(
+    tab,
+    `
+    var sels = ${sels};
+    for (var i = 0; i < sels.length; i++) {
+      var el = document.querySelector(sels[i]);
+      if (!el) continue;
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        var setter = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value') && Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set;
+        if (setter) setter.call(el, ''); else el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        while (el.firstChild) el.removeChild(el.firstChild);
+        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      }
+      break;
+    }
+    return true;
+  `,
+  );
+}
+
 async function probeSelectors(tab, probes) {
   const results = {};
+  // Populate composer before probing send/stop — many sites hide send
+  // button until content is present (ChatGPT, Claude.ai, etc.).
+  if (probes.composer) {
+    await primeComposerForProbe(tab, probes.composer);
+  }
   for (const [role, selectors] of Object.entries(probes)) {
     const res = await drv.evalInTab(
       tab,
@@ -106,6 +169,19 @@ async function probeSelectors(tab, probes) {
     `,
     );
     results[role] = res.value ?? { found: null, tried: selectors };
+  }
+  // Clean up — remove the probe char
+  if (probes.composer) {
+    await clearComposer(tab, probes.composer);
+  }
+  // `reply` and `stop` are transient — they appear only mid-stream.
+  // Missing them on a fresh page is NOT a regression. Mark them as
+  // "unverifiable-without-live-dispatch" rather than failures.
+  if (results.reply && !results.reply.found) {
+    results.reply.deferred = "requires live dispatch";
+  }
+  if (results.stop && !results.stop.found) {
+    results.stop.deferred = "requires active generation";
   }
   return results;
 }
@@ -122,7 +198,9 @@ export async function farmSelectors({ sites, saveScreenshots = false } = {}) {
     await drv.waitForPageReady(tab, { timeoutMs: 15000 });
     await new Promise((r) => setTimeout(r, 2000)); // let SPA hydrate
     const probes = await probeSelectors(tab, w.probes);
-    const misses = Object.entries(probes).filter(([, v]) => !v.found);
+    // Only count "true" misses — skip `reply` / `stop` which are
+    // intentionally absent on a fresh composer.
+    const misses = Object.entries(probes).filter(([, v]) => !v.found && !v.deferred);
     const entry = {
       ts: new Date().toISOString(),
       site: w.site,
