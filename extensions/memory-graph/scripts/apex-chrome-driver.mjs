@@ -1,0 +1,330 @@
+#!/usr/bin/env node
+// Apex Chrome Driver — sovereign facade over the Chrome-drive backends.
+//
+// One API, three backends, picked per-session:
+//
+//   "cdp"         → apex-chrome-cdp     — Apex Chrome instance on
+//                   localhost:9222. Fastest (raw CDP), daemon-safe,
+//                   works in any node subprocess. Preferred default.
+//
+//   "applescript" → apex-chrome-lib     — Joseph's main Chrome via
+//                   osascript + `execute javascript`. Subject to the
+//                   "Allow JavaScript from Apple Events" gate.
+//
+//   "claude-in-chrome" → NOT routable from subprocess. The Chrome-
+//                   extension-backed MCP is only available inside a
+//                   live Claude Code interactive session; it cannot be
+//                   reached from a daemon or a .mjs subprocess. When
+//                   callers ARE interactive, they should use
+//                   mcp__Claude_in_Chrome__* tools directly — not this
+//                   router. This file documents the reason and routes
+//                   around it.
+//
+// Backend selection (in order unless overridden by APEX_CHROME_DRIVER):
+//   1. CDP  — if Apex Chrome is already up at the configured port
+//   2. AppleScript — if Chrome's Apple-Events JS gate is enabled
+//   3. CDP with auto-bootstrap — spawn Apex Chrome ourselves
+//
+// Tab abstraction: every driver method takes or returns an object with
+// a `_backend` tag so subsequent calls route to the matching backend.
+//
+// Exports:
+//   pickBackend(), getBackendInfo()
+//   findOrOpenTab, evalInTab, waitForPageReady, pollUntilStable,
+//   insertText, dispatchKey, closeTab
+//   resolveIntent (semantic: intent-to-selector; currently heuristic,
+//     pluggable to an LLM later per the "Claude-in-Chrome as semantic
+//     compiler" pattern)
+//
+// The API intentionally matches apex-chrome-lib so workers can swap
+// their import from `./apex-chrome-lib.mjs` → `./apex-chrome-driver.mjs`
+// with zero behavior change.
+
+import { spawn } from "node:child_process";
+import { findElements } from "./apex-chrome-cdp-observe.mjs";
+import * as cdp from "./apex-chrome-cdp.mjs";
+import * as applescript from "./apex-chrome-lib.mjs";
+
+// ---- Backend selection -------------------------------------------------
+
+// Cache the picked backend for this process (avoids re-probing).
+let cachedBackend = null;
+
+async function isAppleScriptGateOpen() {
+  return new Promise((resolve) => {
+    const p = spawn(
+      "/usr/bin/osascript",
+      [
+        "-e",
+        'tell application "Google Chrome" to tell active tab of front window to execute javascript "1"',
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    const timer = setTimeout(() => {
+      try {
+        p.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
+      resolve(false);
+    }, 3000);
+    p.stderr.on("data", (c) => {
+      stderr += c.toString();
+    });
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve(true);
+      } else {
+        resolve(!stderr.includes("Apple Events") && !stderr.includes("-10004") && code === 0);
+      }
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
+}
+
+export async function pickBackend({ forceRefresh = false } = {}) {
+  if (cachedBackend && !forceRefresh) {
+    return cachedBackend;
+  }
+  const envOverride = process.env.APEX_CHROME_DRIVER;
+  if (envOverride) {
+    if (envOverride === "cdp" || envOverride === "applescript") {
+      cachedBackend = envOverride;
+      return cachedBackend;
+    }
+    if (envOverride === "claude-in-chrome") {
+      throw new Error(
+        "claude-in-chrome is not routable from subprocess — call mcp__Claude_in_Chrome__* tools directly in an interactive session",
+      );
+    }
+  }
+  // Priority 1: Apex Chrome (CDP) already up
+  if (await cdp.isApexChromeUp()) {
+    cachedBackend = "cdp";
+    return cachedBackend;
+  }
+  // Priority 2: AppleScript gate open on main Chrome
+  if (await isAppleScriptGateOpen()) {
+    cachedBackend = "applescript";
+    return cachedBackend;
+  }
+  // Priority 3: bootstrap CDP — spawns Apex Chrome on demand
+  cachedBackend = "cdp";
+  return cachedBackend;
+}
+
+export async function getBackendInfo() {
+  const backend = await pickBackend();
+  if (backend === "cdp") {
+    const up = await cdp.isApexChromeUp();
+    return { backend, apexChromeUp: up, port: Number(process.env.APEX_CHROME_CDP_PORT ?? 9222) };
+  }
+  return { backend, note: "drives Joseph's main Chrome via AppleScript" };
+}
+
+// ---- Tab shape ---------------------------------------------------------
+//
+// We wrap every backend tab in { _backend, handle } so later calls can
+// dispatch. The object also exposes the handle's public fields (id,
+// url, title, target) transparently for convenience.
+
+function wrap(backend, handle) {
+  const wrapped = { _backend: backend, handle };
+  if (backend === "cdp" && handle) {
+    wrapped.id = handle.id;
+    wrapped.url = handle.url;
+    wrapped.title = handle.title;
+    wrapped.close = () => handle.close?.();
+  } else if (backend === "applescript" && handle) {
+    wrapped.target = handle.target;
+    wrapped.winIdx = handle.winIdx;
+    wrapped.tabIdx = handle.tabIdx;
+    wrapped.created = handle.created;
+  }
+  return wrapped;
+}
+
+// ---- Unified API (matches apex-chrome-lib + adds absorbed UI) ---------
+
+export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
+  const backend = await pickBackend();
+  if (backend === "cdp") {
+    const handle = await cdp.findOrOpenTab({ urlMatch, createUrl });
+    return wrap("cdp", handle);
+  }
+  const handle = await applescript.findOrOpenTab({ urlMatch, createUrl });
+  return wrap("applescript", handle);
+}
+
+export async function evalInTab(tab, code) {
+  if (tab?._backend === "cdp") {
+    return await cdp.evalInTab(tab.handle, code);
+  }
+  if (tab?._backend === "applescript") {
+    return await applescript.evalInTab(tab.handle.target, code);
+  }
+  throw new Error("evalInTab: tab missing _backend tag — was it created via findOrOpenTab?");
+}
+
+export async function waitForPageReady(tab, opts = {}) {
+  if (tab?._backend === "cdp") {
+    return await cdp.waitForPageReady(tab.handle, opts);
+  }
+  if (tab?._backend === "applescript") {
+    return await applescript.waitForPageReady(tab.handle.target, opts);
+  }
+  throw new Error("waitForPageReady: missing _backend tag");
+}
+
+export async function pollUntilStable({ tab, read, ...rest } = {}) {
+  if (tab?._backend === "cdp") {
+    return await cdp.pollUntilStable({
+      tab: tab.handle,
+      read: async (t) => {
+        const wrapped = wrap("cdp", t);
+        return await read(wrapped);
+      },
+      ...rest,
+    });
+  }
+  if (tab?._backend === "applescript") {
+    return await applescript.pollUntilStable({
+      target: tab.handle.target,
+      read: async (t) => {
+        const wrapped = wrap("applescript", { target: t });
+        return await read(wrapped);
+      },
+      ...rest,
+    });
+  }
+  throw new Error("pollUntilStable: missing _backend tag");
+}
+
+export async function insertText(tab, text) {
+  if (tab?._backend === "cdp") {
+    return await cdp.insertText(tab.handle, text);
+  }
+  if (tab?._backend === "applescript") {
+    // AppleScript path doesn't have a direct equivalent; use evalInTab
+    // + execCommand('insertText'). Workers should have their own
+    // ProseMirror-aware paths in the AppleScript world.
+    return await applescript.evalInTab(
+      tab.handle.target,
+      `
+      var el = document.activeElement;
+      if (!el) return { ok: false, error: "no active element" };
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        el.value = (el.value || "") + ${JSON.stringify(String(text))};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return { ok: true };
+      }
+      if (document.execCommand) {
+        document.execCommand('insertText', false, ${JSON.stringify(String(text))});
+        return { ok: true };
+      }
+      return { ok: false, error: "insertion failed" };
+    `,
+    );
+  }
+  throw new Error("insertText: missing _backend tag");
+}
+
+export async function dispatchKey(tab, keyName) {
+  if (tab?._backend === "cdp") {
+    return await cdp.dispatchKey(tab.handle, keyName);
+  }
+  if (tab?._backend === "applescript") {
+    if (keyName === "Enter") {
+      return await applescript.keystrokeReturn();
+    }
+    // Limited keystroke surface under AppleScript.
+    throw new Error(`dispatchKey: AppleScript backend only supports "Enter"; got ${keyName}`);
+  }
+  throw new Error("dispatchKey: missing _backend tag");
+}
+
+export async function closeTab(tab) {
+  if (tab?._backend === "cdp") {
+    return await cdp.closeTab(tab.handle);
+  }
+  if (tab?._backend === "applescript") {
+    // apex-chrome-lib doesn't expose close; approximate via AppleScript.
+    const script = `tell application "Google Chrome" to close ${tab.handle.target}`;
+    const res = await applescript.runAppleScript(script);
+    return res.ok;
+  }
+  return false;
+}
+
+// ---- Semantic compiler: intent → selector -----------------------------
+//
+// Usage: `const { selector, candidates } = await resolveIntent(tab,
+// "send button"); await click({ selector, tab });`
+//
+// Current implementation: CSS heuristic + text match (the same one in
+// apex-chrome-cdp-observe's findElements). The interface is designed
+// for pluggable upgrades — callers receive `candidates` ranked by
+// score; an LLM-backed resolver can later rerank without changing the
+// API contract.
+
+export async function resolveIntent(tab, intent, { limit = 5 } = {}) {
+  if (tab?._backend !== "cdp") {
+    // findElements is CDP-only right now; an AppleScript port is
+    // trivial but unbuilt. Callers fallback to CSS selectors directly.
+    return { selector: null, candidates: [], backend: tab?._backend };
+  }
+  const candidates = await findElements(tab.handle, intent, { limit });
+  const best = candidates[0];
+  return {
+    selector: best?.refHint ?? null,
+    candidates,
+    backend: "cdp",
+    note: "heuristic resolver — pluggable to an LLM-backed finder via same signature",
+  };
+}
+
+// ---- CLI (smoke test / status) ----------------------------------------
+
+async function mainCli() {
+  const cmd = process.argv[2] ?? "status";
+  if (cmd === "status") {
+    const info = await getBackendInfo();
+    console.log(`[apex-chrome-driver] picked backend: ${info.backend}`);
+    for (const [k, v] of Object.entries(info)) {
+      if (k === "backend") {
+        continue;
+      }
+      console.log(`  ${k}: ${v}`);
+    }
+    return;
+  }
+  if (cmd === "eval") {
+    const urlMatch = process.argv[3];
+    const code = process.argv.slice(4).join(" ");
+    if (!urlMatch || !code) {
+      console.error("usage: apex-chrome-driver.mjs eval <url-substring> <js-expr>");
+      process.exit(2);
+    }
+    const tab = await findOrOpenTab({ urlMatch });
+    await waitForPageReady(tab, { timeoutMs: 8000 });
+    const res = await evalInTab(tab, `return ${code};`);
+    await closeTab(tab);
+    console.log(JSON.stringify(res, null, 2));
+    return;
+  }
+  console.error("usage: apex-chrome-driver.mjs [status|eval <url> <expr>]");
+  process.exit(2);
+}
+
+const isDirectRun = import.meta.url === `file://${process.argv[1]}`;
+if (isDirectRun) {
+  mainCli().catch((err) => {
+    console.error(`[apex-chrome-driver] fatal: ${err instanceof Error ? err.stack : String(err)}`);
+    process.exitCode = 1;
+  });
+}

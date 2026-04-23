@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copy to ~/Library/LaunchAgents/com.josephmatsiko.apex-chrome.plist then:
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.josephmatsiko.apex-chrome.plist
+     Fires on user login + every 30 minutes thereafter. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.josephmatsiko.apex-chrome</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-chrome-launchd.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>APEX_CHROME_PROFILES</key>
+    <string>a b c</string>
+    <key>PATH</key>
+    <string>/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/josephmatsiko/.openclaw/logs/apex-chrome.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/josephmatsiko/.openclaw/logs/apex-chrome.stderr.log</string>
+</dict>
+</plist>
