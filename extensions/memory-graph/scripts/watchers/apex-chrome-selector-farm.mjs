@@ -51,7 +51,12 @@ const WORKER_SELECTORS = [
     site: "perplexity",
     url: "https://www.perplexity.ai/",
     probes: {
-      composer: ['textarea[placeholder*="Ask" i]', "textarea"],
+      composer: [
+        "#ask-input",
+        'div[contenteditable="true"][role="textbox"]',
+        'textarea[placeholder*="Ask" i]',
+        "textarea",
+      ],
       send: ['button[aria-label*="Submit" i]', 'button[type="submit"]'],
       reply: ['[id^="answer-"]', "article"],
     },
@@ -195,6 +200,19 @@ export async function farmSelectors({ sites, saveScreenshots = false } = {}) {
       urlMatch: w.site === "chatgpt" ? "chatgpt.com" : w.site.replace("-ai", ".ai"),
       createUrl: w.url,
     });
+    // Always force-navigate to the canonical URL. Reused tabs may be
+    // parked on /library, /search/:id, /collections, /settings — each
+    // renders a different DOM. We want the chat-root layout.
+    try {
+      if (tab._backend === "cdp") {
+        const cdp = await import("../apex-chrome-cdp.mjs");
+        await cdp.navigate(tab.handle, w.url);
+      } else {
+        await drv.evalInTab(tab, `location.href = ${JSON.stringify(w.url)}; return true;`);
+      }
+    } catch {
+      /* probe-only best-effort */
+    }
     await drv.waitForPageReady(tab, { timeoutMs: 15000 });
     await new Promise((r) => setTimeout(r, 2000)); // let SPA hydrate
     const probes = await probeSelectors(tab, w.probes);

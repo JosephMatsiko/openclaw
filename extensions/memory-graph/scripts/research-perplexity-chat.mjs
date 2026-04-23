@@ -26,7 +26,9 @@ async function waitComposerReady(tab, { timeoutMs = 15000 } = {}) {
     const r = await evalInTab(
       tab,
       `
-      var composer = document.querySelector('textarea[placeholder*="Ask" i]')
+      var composer = document.querySelector('#ask-input')
+                  || document.querySelector('div[contenteditable="true"][role="textbox"]')
+                  || document.querySelector('textarea[placeholder*="Ask" i]')
                   || document.querySelector('textarea[placeholder*="question" i]')
                   || document.querySelector('textarea')
                   || document.querySelector('div[contenteditable="true"]');
@@ -54,7 +56,9 @@ async function submitPrompt(tab, prompt) {
   const insert = await evalInTab(
     tab,
     `
-    var c = document.querySelector('textarea[placeholder*="Ask" i]')
+    var c = document.querySelector('#ask-input')
+         || document.querySelector('div[contenteditable="true"][role="textbox"]')
+         || document.querySelector('textarea[placeholder*="Ask" i]')
          || document.querySelector('textarea[placeholder*="question" i]')
          || document.querySelector('textarea')
          || document.querySelector('div[contenteditable="true"]');
@@ -136,11 +140,17 @@ export async function askPerplexityChat({ prompt } = {}) {
     throw new Error("askPerplexityChat: prompt required");
   }
   const tab = await findOrOpenTab({ urlMatch: PPLX_URL_MATCH, createUrl: PPLX_START_URL });
-  if (tab.created) {
-    const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: PPLX_URL_MATCH });
-    if (!ready) {
-      throw new Error("perplexity.ai did not finish loading");
-    }
+  // Always force-navigate to the chat root. Reused tabs may be parked on
+  // /library, /search/:id, /collections, /settings — each a different DOM.
+  if (tab._backend === "cdp") {
+    const cdp = await import("./apex-chrome-cdp.mjs");
+    await cdp.navigate(tab.handle, PPLX_START_URL);
+  } else {
+    await evalInTab(tab, `location.href = ${JSON.stringify(PPLX_START_URL)}; return true;`);
+  }
+  const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: PPLX_URL_MATCH });
+  if (!ready) {
+    throw new Error("perplexity.ai did not finish loading");
   }
   const state = await waitComposerReady(tab);
   if (!state.ok) {
