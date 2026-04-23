@@ -272,20 +272,81 @@ export async function closeTab(tab) {
 // score; an LLM-backed resolver can later rerank without changing the
 // API contract.
 
-export async function resolveIntent(tab, intent, { limit = 5 } = {}) {
+export async function resolveIntent(tab, intent, { limit = 5, useLlm = false } = {}) {
   if (tab?._backend !== "cdp") {
     // findElements is CDP-only right now; an AppleScript port is
     // trivial but unbuilt. Callers fallback to CSS selectors directly.
     return { selector: null, candidates: [], backend: tab?._backend };
   }
   const candidates = await findElements(tab.handle, intent, { limit });
-  const best = candidates[0];
+  let best = candidates[0];
+  let rerankReason = "heuristic-first-match";
+  if (useLlm && candidates.length > 1) {
+    try {
+      const reranked = await llmRerank({ intent, candidates });
+      if (reranked) {
+        best = reranked;
+        rerankReason = "llm-reranked";
+      }
+    } catch (err) {
+      rerankReason = `llm-failed-fallback-heuristic: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
   return {
     selector: best?.refHint ?? null,
     candidates,
     backend: "cdp",
-    note: "heuristic resolver — pluggable to an LLM-backed finder via same signature",
+    rerankReason,
   };
+}
+
+// LLM-backed reranker — hand candidates + natural-language intent to
+// Claude Opus, get back the best match. Used only when caller passes
+// `useLlm: true`; default path is heuristic (free, fast).
+async function llmRerank({ intent, candidates }) {
+  const { spawn } = await import("node:child_process");
+  const prompt = [
+    `You are picking the single best DOM element for a natural-language intent.`,
+    ``,
+    `Intent: ${intent}`,
+    ``,
+    `Candidates (JSON):`,
+    JSON.stringify(candidates, null, 2),
+    ``,
+    `Output ONLY the index (0-based) of the best match, nothing else.`,
+  ].join("\n");
+  const out = await new Promise((resolve, reject) => {
+    const p = spawn(
+      "claude",
+      ["-p", prompt, "--model", "opus", "--fallback-model", "sonnet", "--output-format", "text"],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGTERM");
+      reject(new Error("llmRerank timeout"));
+    }, 30_000);
+    p.stdout.on("data", (c) => {
+      stdout += c.toString();
+    });
+    p.stderr.on("data", (c) => {
+      stderr += c.toString();
+    });
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`claude exited ${code}: ${stderr.slice(0, 200)}`));
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+  const idx = Number.parseInt(out.match(/\d+/)?.[0] ?? "0", 10);
+  if (Number.isNaN(idx) || idx < 0 || idx >= candidates.length) {
+    return null;
+  }
+  return candidates[idx];
 }
 
 // ---- CLI (smoke test / status) ----------------------------------------

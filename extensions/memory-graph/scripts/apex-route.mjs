@@ -31,10 +31,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dispatch } from "./apex-dispatch.mjs";
+import { withPolicy } from "./apex-policy.mjs";
 import { deepResearchBeat } from "./deep-research.mjs";
+import { askAiStudioChat } from "./research-aistudio-chat.mjs";
 import { askChatGPTChat } from "./research-chatgpt-chat.mjs";
+import { askClaudeAiChat } from "./research-claude-ai-chat.mjs";
+import { askGrokChat } from "./research-grok-chat.mjs";
 import { askPerplexityChat } from "./research-perplexity-chat.mjs";
-import { probeAll } from "./worker-probe.mjs";
+import { probeAll, isHealthy } from "./worker-probe.mjs";
 
 const HOME = homedir();
 const DB_PATH = join(HOME, ".openclaw", "memory", "graph.sqlite");
@@ -244,27 +248,81 @@ async function handleAsk({ text, claims, summaries, single = false }) {
   // prompt so per-worker answers are already memory-aware; the
   // synthesis step gets the same grounding plus the witnesses.
   const groundedPrompt = buildAskPrompt({ text, claims, summaries, role: "n-plex" });
-  const workers = [
+  // Dynamic worker list — each entry describes how to reach a frontier
+  // model. Health-gated at dispatch time (skip workers whose probe is
+  // DOWN) and policy-wrapped so tier-swaps are never silent.
+  const health = await probeAll({ forceRefresh: false });
+  const workerCatalog = [
     {
       id: "claude-opus",
-      ask: async ({ prompt }) => ({
-        text: await askClaudeOpus({ prompt }),
-        modelUsed: "claude-cli/claude-opus-4-7",
-      }),
+      probeKey: "claude",
+      policyTarget: "claude-opus-4-7",
+      ask: async ({ prompt }) =>
+        withPolicy({ target: "claude-opus-4-7", prompt }, async ({ prompt }) => ({
+          text: await askClaudeOpus({ prompt }),
+          modelUsed: "claude-cli/claude-opus-4-7",
+        })),
     },
     {
       id: "gemini-pro",
-      ask: async ({ prompt }) => await askGeminiPro({ prompt }),
+      probeKey: "gemini",
+      policyTarget: "gemini-3.1-pro-preview",
+      ask: async ({ prompt }) =>
+        withPolicy(
+          { target: "gemini-3.1-pro-preview", prompt },
+          async ({ prompt }) => await askGeminiPro({ prompt }),
+        ),
     },
     {
       id: "chatgpt-plus",
-      ask: async ({ prompt }) => await askChatGPTChat({ prompt }),
+      probeKey: "chatgpt",
+      policyTarget: "gpt-5",
+      ask: async ({ prompt }) =>
+        withPolicy(
+          { target: "gpt-5", prompt },
+          async ({ prompt }) => await askChatGPTChat({ prompt }),
+        ),
     },
     {
       id: "perplexity-pro",
-      ask: async ({ prompt }) => await askPerplexityChat({ prompt }),
+      probeKey: "perplexity",
+      policyTarget: "perplexity-pro",
+      ask: async ({ prompt }) =>
+        withPolicy(
+          { target: "perplexity-pro", prompt },
+          async ({ prompt }) => await askPerplexityChat({ prompt }),
+        ),
+    },
+    {
+      id: "claude-ai",
+      probeKey: "claude-ai",
+      policyTarget: "claude-opus-via-claude-ai",
+      ask: async ({ prompt }) =>
+        withPolicy(
+          { target: "claude-opus-via-claude-ai", prompt },
+          async ({ prompt }) => await askClaudeAiChat({ prompt }),
+        ),
+    },
+    {
+      id: "aistudio",
+      probeKey: "aistudio",
+      policyTarget: "gemini-3.1-pro-webchat",
+      ask: async ({ prompt }) =>
+        withPolicy(
+          { target: "gemini-3.1-pro-webchat", prompt },
+          async ({ prompt }) => await askAiStudioChat({ prompt }),
+        ),
+    },
+    {
+      id: "grok",
+      probeKey: "grok",
+      ask: async ({ prompt }) => await askGrokChat({ prompt }),
     },
   ];
+  const workers = workerCatalog.filter((w) => isHealthy(health, w.probeKey));
+  if (workers.length === 0) {
+    throw new Error(`handleAsk: no healthy workers — health=${JSON.stringify(health)}`);
+  }
   const result = await dispatch({
     prompt: groundedPrompt,
     workers,

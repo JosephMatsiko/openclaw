@@ -203,141 +203,126 @@ async function probeSearxng() {
   }
 }
 
-// ChatGPT Plus probe — no CLI exists (sovereign path is chatgpt.com via
-// claude-in-chrome MCP, per research-chatgpt-chat.mjs). We can't fire a
-// real inference without opening a tab and spending a Plus turn, so we
-// probe for the thing that actually gates the worker: a present
-// chatgpt.com session cookie in the live Chrome profile. If it's gone,
-// the worker cannot sign in and will emit { error: "not-signed-in" }.
-async function probeChatGPT() {
-  const t0 = now();
-  const cookiesPath =
-    process.env.CHROME_COOKIES_PATH ??
-    join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
-  if (!existsSync(cookiesPath)) {
-    return {
-      worker: "chatgpt",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `Chrome cookies DB not found at ${cookiesPath}`,
-    };
-  }
-  let db;
-  try {
-    // immutable=1 + read-only — never conflicts with Chrome's writers.
-    db = new DatabaseSync(`file:${cookiesPath}?mode=ro&immutable=1`, { readOnly: true });
-  } catch (err) {
-    return {
-      worker: "chatgpt",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `cookies open failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-  try {
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM cookies
-          WHERE (host_key = 'chatgpt.com'
-                 OR host_key = '.chatgpt.com'
-                 OR host_key LIKE '%.chatgpt.com')
-            AND (name LIKE '%session%'
-                 OR name = '__Secure-next-auth.session-token'
-                 OR name = '__Secure-next-auth.callback-url'
-                 OR name = 'cf_clearance')`,
-      )
-      .get();
-    const n = Number(row?.n ?? 0);
-    const healthy = n > 0;
-    return {
-      worker: "chatgpt",
-      healthy,
-      latencyMs: now() - t0,
-      details: healthy
-        ? `${n} session cookie(s) on chatgpt.com`
-        : "no chatgpt.com session cookies — sign in at chatgpt.com in Chrome once",
-    };
-  } catch (err) {
-    return {
-      worker: "chatgpt",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `cookies query failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  } finally {
-    db.close();
-  }
+// Cookie-based probe factory for Chrome-web subscription workers. Each
+// worker has no CLI; presence of a session cookie for its domain in the
+// main Chrome profile is the gate. Factory avoids 60-LOC duplication
+// per worker.
+function makeCookieProbe({ worker, domains, matchNames }) {
+  return async function probe() {
+    const t0 = now();
+    const cookiesPath =
+      process.env.CHROME_COOKIES_PATH ??
+      join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
+    if (!existsSync(cookiesPath)) {
+      return {
+        worker,
+        healthy: false,
+        latencyMs: now() - t0,
+        details: `Chrome cookies DB not found at ${cookiesPath}`,
+      };
+    }
+    let db;
+    try {
+      db = new DatabaseSync(`file:${cookiesPath}?mode=ro&immutable=1`, { readOnly: true });
+    } catch (err) {
+      return {
+        worker,
+        healthy: false,
+        latencyMs: now() - t0,
+        details: `cookies open failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    try {
+      const domainList = Array.isArray(domains) ? domains : [domains];
+      const domainClauses = domainList
+        .flatMap((d) => [`host_key = '${d}'`, `host_key = '.${d}'`, `host_key LIKE '%.${d}'`])
+        .join(" OR ");
+      const nameClauses = (matchNames ?? ["%session%", "%auth%", "cf_clearance"])
+        .map((n) => (n.includes("%") ? `name LIKE '${n}'` : `name = '${n}'`))
+        .join(" OR ");
+      const row = db
+        .prepare(`SELECT COUNT(*) AS n FROM cookies WHERE (${domainClauses}) AND (${nameClauses})`)
+        .get();
+      const n = Number(row?.n ?? 0);
+      const healthy = n > 0;
+      return {
+        worker,
+        healthy,
+        latencyMs: now() - t0,
+        details: healthy
+          ? `${n} session cookie(s) on ${domainList.join(", ")}`
+          : `no session cookies for ${domainList.join(", ")} — sign in once`,
+      };
+    } catch (err) {
+      return {
+        worker,
+        healthy: false,
+        latencyMs: now() - t0,
+        details: `cookies query failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    } finally {
+      db.close();
+    }
+  };
 }
 
-// Perplexity Pro probe — no CLI; sovereign path is perplexity.ai via
-// Chrome driven by research-perplexity-chat.mjs. Same cookie-based
-// gate as probeChatGPT: if the Chrome profile lacks a session cookie,
-// the worker can't sign in and will emit "not signed in".
-async function probePerplexity() {
-  const t0 = now();
-  const cookiesPath =
-    process.env.CHROME_COOKIES_PATH ??
-    join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
-  if (!existsSync(cookiesPath)) {
-    return {
-      worker: "perplexity",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `Chrome cookies DB not found at ${cookiesPath}`,
-    };
-  }
-  let db;
-  try {
-    db = new DatabaseSync(`file:${cookiesPath}?mode=ro&immutable=1`, { readOnly: true });
-  } catch (err) {
-    return {
-      worker: "perplexity",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `cookies open failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-  try {
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM cookies
-          WHERE (host_key = 'perplexity.ai'
-                 OR host_key = '.perplexity.ai'
-                 OR host_key LIKE '%.perplexity.ai')
-            AND (name LIKE '%session%'
-                 OR name LIKE '%auth%'
-                 OR name = 'next-auth.session-token'
-                 OR name = '__Secure-next-auth.session-token'
-                 OR name = 'cf_clearance')`,
-      )
-      .get();
-    const n = Number(row?.n ?? 0);
-    const healthy = n > 0;
-    return {
-      worker: "perplexity",
-      healthy,
-      latencyMs: now() - t0,
-      details: healthy
-        ? `${n} session cookie(s) on perplexity.ai`
-        : "no perplexity.ai session cookies — sign in at perplexity.ai in Chrome once",
-    };
-  } catch (err) {
-    return {
-      worker: "perplexity",
-      healthy: false,
-      latencyMs: now() - t0,
-      details: `cookies query failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  } finally {
-    db.close();
-  }
-}
+const probeChatGPT = makeCookieProbe({
+  worker: "chatgpt",
+  domains: ["chatgpt.com"],
+  matchNames: [
+    "%session%",
+    "__Secure-next-auth.session-token",
+    "__Secure-next-auth.callback-url",
+    "cf_clearance",
+  ],
+});
+
+const probePerplexity = makeCookieProbe({
+  worker: "perplexity",
+  domains: ["perplexity.ai"],
+  matchNames: [
+    "%session%",
+    "%auth%",
+    "next-auth.session-token",
+    "__Secure-next-auth.session-token",
+    "cf_clearance",
+  ],
+});
+
+const probeGrok = makeCookieProbe({
+  worker: "grok",
+  domains: ["grok.com", "x.ai"],
+  matchNames: ["%session%", "%auth%", "auth_token", "cf_clearance", "_grok_session"],
+});
+
+const probeClaudeAi = makeCookieProbe({
+  worker: "claude-ai",
+  domains: ["claude.ai"],
+  matchNames: ["%session%", "%auth%", "sessionKey", "cf_clearance"],
+});
+
+const probeAiStudio = makeCookieProbe({
+  worker: "aistudio",
+  domains: ["aistudio.google.com", "google.com"],
+  matchNames: ["%session%", "SID", "HSID", "SSID", "SAPISID", "APISID"],
+});
+
+// Codex shares ChatGPT Plus cookies (chatgpt.com/codex is Plus-gated).
+const probeCodex = makeCookieProbe({
+  worker: "codex",
+  domains: ["chatgpt.com"],
+  matchNames: ["%session%", "__Secure-next-auth.session-token", "cf_clearance"],
+});
 
 const REGISTRY = {
   claude: probeClaude,
   gemini: probeGemini,
   chatgpt: probeChatGPT,
   perplexity: probePerplexity,
+  grok: probeGrok,
+  "claude-ai": probeClaudeAi,
+  aistudio: probeAiStudio,
+  codex: probeCodex,
   ollama: probeOllama,
   searxng: probeSearxng,
 };

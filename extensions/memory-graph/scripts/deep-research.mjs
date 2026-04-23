@@ -29,11 +29,14 @@
 
 import { beatsFor } from "./apex-beats.mjs";
 import { dispatch } from "./apex-dispatch.mjs";
+import { researchBeat as aistudioResearch } from "./research-aistudio-chat.mjs";
 import { withCache } from "./research-cache.mjs";
 import { researchBeat as chatgptResearch } from "./research-chatgpt-chat.mjs";
+import { researchBeat as claudeAiResearch } from "./research-claude-ai-chat.mjs";
 import { researchBeat as claudeResearch } from "./research-claude.mjs";
 import { enrichItemsWithDominance } from "./research-enrich.mjs";
 import { researchBeat as geminiResearch } from "./research-gemini.mjs";
+import { researchBeat as grokResearch } from "./research-grok-chat.mjs";
 import { researchBeat as perplexityResearch } from "./research-perplexity-chat.mjs";
 
 function normalizeUrl(raw) {
@@ -170,6 +173,9 @@ const RESEARCH_WORKERS = [
   { id: "gemini", run: geminiResearch },
   { id: "chatgpt", run: chatgptResearch },
   { id: "perplexity", run: perplexityResearch },
+  { id: "claude-ai", run: claudeAiResearch },
+  { id: "aistudio", run: aistudioResearch },
+  { id: "grok", run: grokResearch },
 ];
 
 async function dispatchWorkers(beat, items) {

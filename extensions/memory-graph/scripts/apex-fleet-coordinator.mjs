@@ -54,11 +54,41 @@ const NODE_BIN = process.execPath;
 // workers in parallel via apex-dispatch — this policy just picks
 // single-worker fallback order for role slots.
 const ROLE_POLICY = {
-  "research-primary": ["claude", "gemini", "chatgpt", "perplexity"],
-  "research-secondary": ["gemini", "chatgpt", "perplexity", "claude", "ollama"],
+  "research-primary": [
+    "claude",
+    "gemini",
+    "chatgpt",
+    "perplexity",
+    "claude-ai",
+    "aistudio",
+    "grok",
+  ],
+  "research-secondary": [
+    "gemini",
+    "chatgpt",
+    "perplexity",
+    "claude-ai",
+    "aistudio",
+    "grok",
+    "claude",
+    "ollama",
+  ],
   embedding: ["ollama"],
-  search: ["searxng", "duckduckgo-builtin"], // duckduckgo via apex-search is always available
-  quickchat: ["claude", "gemini", "chatgpt", "perplexity", "ollama"],
+  search: ["searxng", "duckduckgo-builtin"],
+  quickchat: [
+    "claude",
+    "gemini",
+    "chatgpt",
+    "perplexity",
+    "grok",
+    "claude-ai",
+    "aistudio",
+    "ollama",
+  ],
+  // Code-lane — Claude Code is the home-field master; Codex + Gemini
+  // give additional cloud-sandboxed + grounded perspectives. Codex
+  // is sovereignty-gated per research-chatgpt-codex.mjs.
+  "code-review": ["claude", "codex", "gemini"],
 };
 
 // Critical roles — degradation triggers escalation.
