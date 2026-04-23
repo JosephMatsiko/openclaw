@@ -13,6 +13,15 @@ export type SandboxDockerSettings = {
   tmpfs?: string[];
   /** Container network mode (bridge|none|custom). */
   network?: string;
+  /**
+   * High-level network isolation profile (takes precedence over `network`).
+   * - `"air-gap"`: no outbound access (--network none, default)
+   * - `"allow-outbound"`: outbound to public IPs; RFC1918/link-local/loopback blocked via iptables
+   * - `"allow-list"`: only listed host:port pairs allowed; everything else dropped
+   */
+  networkProfile?: "air-gap" | "allow-outbound" | "allow-list";
+  /** Host:port patterns allowed in allow-list profile (e.g. ["api.github.com:443"]). */
+  networkProfileAllowList?: string[];
   /** Container user (uid:gid). */
   user?: string;
   /** Drop Linux capabilities. */

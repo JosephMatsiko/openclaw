@@ -18,6 +18,7 @@ import {
   DEFAULT_SANDBOX_WORKDIR,
   DEFAULT_SANDBOX_WORKSPACE_ROOT,
 } from "./constants.js";
+import { normalizeNetworkProfile } from "./network-profile.js";
 import { resolveSandboxToolPolicyForAgent } from "./tool-policy.js";
 import type {
   SandboxBrowserConfig,
@@ -108,6 +109,12 @@ export function resolveSandboxDockerConfig(params: {
     readOnlyRoot: agentDocker?.readOnlyRoot ?? globalDocker?.readOnlyRoot ?? true,
     tmpfs: agentDocker?.tmpfs ?? globalDocker?.tmpfs ?? ["/tmp", "/var/tmp", "/run"],
     network: agentDocker?.network ?? globalDocker?.network ?? "none",
+    networkProfile:
+      normalizeNetworkProfile(agentDocker?.networkProfile) ??
+      normalizeNetworkProfile(globalDocker?.networkProfile) ??
+      undefined,
+    networkProfileAllowList:
+      agentDocker?.networkProfileAllowList ?? globalDocker?.networkProfileAllowList,
     user: agentDocker?.user ?? globalDocker?.user,
     capDrop: agentDocker?.capDrop ?? globalDocker?.capDrop ?? ["ALL"],
     env,

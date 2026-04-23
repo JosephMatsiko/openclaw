@@ -167,6 +167,7 @@ import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
 import { defaultRuntime } from "../../runtime.js";
 import { computeSandboxConfigHash } from "./config-hash.js";
 import { DEFAULT_SANDBOX_IMAGE } from "./constants.js";
+import { resolveNetworkProfileArgs } from "./network-profile.js";
 import { readRegistry, updateRegistry } from "./registry.js";
 import { resolveSandboxAgentId, resolveSandboxScopeKey, slugifySessionKey } from "./shared.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
@@ -394,7 +395,17 @@ export function buildSandboxCreateArgs(params: {
   for (const entry of params.cfg.tmpfs) {
     args.push("--tmpfs", entry);
   }
-  if (params.cfg.network) {
+  // networkProfile takes precedence over the raw `network` field when set.
+  if (params.cfg.networkProfile) {
+    const profileArgs = resolveNetworkProfileArgs(
+      params.cfg.networkProfile,
+      params.cfg.networkProfileAllowList,
+    );
+    args.push("--network", profileArgs.network);
+    if (profileArgs.addNetAdmin) {
+      args.push("--cap-add", "NET_ADMIN");
+    }
+  } else if (params.cfg.network) {
     args.push("--network", params.cfg.network);
   }
   if (params.cfg.user) {
@@ -501,8 +512,13 @@ async function createSandboxContainer(params: {
   await execDocker(args);
   await execDocker(["start", name]);
 
-  if (cfg.setupCommand?.trim()) {
-    await execDocker(["exec", "-i", name, "/bin/sh", "-lc", cfg.setupCommand]);
+  // Compute effective setup command: network-profile iptables script first, then user setup.
+  const profileScript = cfg.networkProfile
+    ? resolveNetworkProfileArgs(cfg.networkProfile, cfg.networkProfileAllowList).setupScript
+    : "";
+  const combinedSetup = [profileScript, cfg.setupCommand?.trim() ?? ""].filter(Boolean).join("\n");
+  if (combinedSetup) {
+    await execDocker(["exec", "-i", name, "/bin/sh", "-lc", combinedSetup]);
   }
 }
 
