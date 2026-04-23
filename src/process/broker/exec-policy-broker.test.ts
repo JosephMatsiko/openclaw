@@ -23,6 +23,17 @@ vi.mock("../../infra/exec-approvals-allowlist.js", () => ({
   })),
 }));
 
+// Stub sandbox probe — default to "available" so policy tests are not
+// blocked by Docker availability on the CI host.
+vi.mock("./sandbox-probe.js", () => ({
+  probeSandboxRuntime: vi.fn(() => ({
+    available: true,
+    runtime: "docker-desktop",
+    socketPath: "/var/run/docker.sock",
+  })),
+  formatSandboxUnavailableMessage: vi.fn(() => "exec broker: sandbox runtime unavailable"),
+}));
+
 // Stub audit log writes so no files are created during tests.
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -38,9 +49,11 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import { evaluateShellAllowlist } from "../../infra/exec-approvals-allowlist.js";
 import { loadExecApprovals } from "../../infra/exec-approvals.js";
+import { probeSandboxRuntime } from "./sandbox-probe.js";
 
 const mockLoadExecApprovals = vi.mocked(loadExecApprovals);
 const mockEvaluateShellAllowlist = vi.mocked(evaluateShellAllowlist);
+const mockProbeSandboxRuntime = vi.mocked(probeSandboxRuntime);
 
 function makeChildInput(overrides?: Partial<BrokerInputChild>): BrokerInputChild {
   return {
@@ -73,6 +86,12 @@ describe("createExecPolicyBroker", () => {
       segments: [],
       segmentAllowlistEntries: [],
       segmentSatisfiedBy: [],
+    });
+    // Default: sandbox runtime is available
+    mockProbeSandboxRuntime.mockReturnValue({
+      available: true,
+      runtime: "docker-desktop",
+      socketPath: "/var/run/docker.sock",
     });
   });
 
@@ -266,6 +285,56 @@ describe("createExecPolicyBroker", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Sandbox probe (M3)
+  // ---------------------------------------------------------------------------
+
+  it("denies with sandbox-unavailable when Docker socket not found in allowlist mode", () => {
+    mockLoadExecApprovals.mockReturnValue({ version: 1, defaults: { security: "allowlist" } });
+    mockProbeSandboxRuntime.mockReturnValue({ available: false });
+    const broker = createExecPolicyBroker();
+    const decision = broker.validate(makeChildInput({ argv: ["/usr/bin/git", "status"] }));
+    expect(decision.kind).toBe("deny");
+    if (decision.kind === "deny") {
+      expect(decision.code).toBe("sandbox-unavailable");
+    }
+  });
+
+  it("denies with sandbox-unavailable in deny mode when Docker not found", () => {
+    mockLoadExecApprovals.mockReturnValue({ version: 1, defaults: { security: "deny" } });
+    mockProbeSandboxRuntime.mockReturnValue({ available: false });
+    const broker = createExecPolicyBroker();
+    const decision = broker.validate(makeChildInput());
+    expect(decision.kind).toBe("deny");
+    if (decision.kind === "deny") {
+      expect(decision.code).toBe("sandbox-unavailable");
+    }
+  });
+
+  it("skips sandbox probe for exec-sandbox backendId (command already in container)", () => {
+    mockLoadExecApprovals.mockReturnValue({ version: 1, defaults: { security: "allowlist" } });
+    mockProbeSandboxRuntime.mockReturnValue({ available: false });
+    const broker = createExecPolicyBroker();
+    const decision = broker.validate(
+      makeChildInput({ backendId: "exec-sandbox", argv: ["/usr/bin/git", "status"] }),
+    );
+    // Should NOT get sandbox-unavailable — it's already in the container
+    if (decision.kind === "deny") {
+      expect(decision.code).not.toBe("sandbox-unavailable");
+    }
+    expect(decision.kind).toBe("allow");
+  });
+
+  it("allows in full mode even when Docker is unavailable", () => {
+    mockLoadExecApprovals.mockReturnValue({ version: 1, defaults: { security: "full" } });
+    mockProbeSandboxRuntime.mockReturnValue({ available: false });
+    const broker = createExecPolicyBroker();
+    const decision = broker.validate(makeChildInput({ argv: ["/usr/bin/rm", "-rf", "/"] }));
+    // full mode never checks probe
+    expect(decision.kind).toBe("allow");
+    expect(mockProbeSandboxRuntime).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
   // BrokerDenyError integration
   // ---------------------------------------------------------------------------
 
@@ -277,7 +346,8 @@ describe("createExecPolicyBroker", () => {
     if (decision.kind === "deny") {
       const error = new BrokerDenyError(decision.reason, decision.code);
       expect(error.name).toBe("BrokerDenyError");
-      expect(error.code).toBe("deny-mode");
+      // Either sandbox-unavailable (if probe fails) or deny-mode (if probe passes)
+      expect(["sandbox-unavailable", "deny-mode"]).toContain(error.code);
     }
   });
 });

@@ -3,6 +3,7 @@ import path from "node:path";
 import { evaluateShellAllowlist } from "../../infra/exec-approvals-allowlist.js";
 import { loadExecApprovals, normalizeExecSecurity } from "../../infra/exec-approvals.js";
 import type { ExecAllowlistEntry } from "../../infra/exec-approvals.types.js";
+import { formatSandboxUnavailableMessage, probeSandboxRuntime } from "./sandbox-probe.js";
 import type { BrokerDecision, BrokerInput, ExecBroker } from "./types.js";
 
 // Default allowed bin basenames when security="allowlist".
@@ -231,6 +232,25 @@ export function createExecPolicyBroker(): ExecBroker {
           return { kind: "allow", reason: "full-mode", env: redactEnv(env) };
         }
         return { kind: "allow", reason: "full-mode" };
+      }
+
+      // Non-full security modes require a sandbox runtime to be available.
+      // If backendId is NOT "exec-sandbox" (i.e. the command would run on the host),
+      // fail closed when no Docker/OrbStack socket is reachable.
+      if (backendId !== "exec-sandbox") {
+        const probe = probeSandboxRuntime();
+        if (!probe.available) {
+          const reason = formatSandboxUnavailableMessage();
+          writeAudit({
+            kind: "deny",
+            mode: input.mode,
+            sessionId,
+            backendId,
+            reason,
+            code: "sandbox-unavailable",
+          });
+          return { kind: "deny", reason, code: "sandbox-unavailable" };
+        }
       }
 
       // deny mode — block everything
