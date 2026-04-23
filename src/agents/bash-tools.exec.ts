@@ -1381,6 +1381,7 @@ export function createExecTool(
         timeout?: number;
         pty?: boolean;
         elevated?: boolean;
+        elevateReason?: string;
         host?: string;
         security?: string;
         ask?: string;
@@ -1467,7 +1468,17 @@ export function createExecTool(
         }
       }
       if (elevatedRequested) {
-        logInfo(`exec: elevated command ${truncateMiddle(params.command, 120)}`);
+        // Require elevateReason for per-command elevation (≥10 chars).
+        const reason = typeof params.elevateReason === "string" ? params.elevateReason.trim() : "";
+        if (reason.length < 10) {
+          throw new Error(
+            "elevated=true requires elevateReason with at least 10 characters. " +
+              "Provide a brief justification so it can be audited.",
+          );
+        }
+        logInfo(
+          `exec: elevated command ${truncateMiddle(params.command, 120)} — reason: ${truncateMiddle(reason, 200)}`,
+        );
       }
       const target = resolveExecTarget({
         configuredTarget: defaults?.host,

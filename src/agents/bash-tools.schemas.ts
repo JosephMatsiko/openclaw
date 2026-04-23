@@ -26,6 +26,12 @@ export const execSchema = Type.Object({
       description: "Run on the host with elevated permissions (if allowed)",
     }),
   ),
+  elevateReason: Type.Optional(
+    Type.String({
+      description:
+        "Required when elevated=true. Non-empty justification (≥10 chars) logged in the audit trail. Prefer per-command elevation over session-level /elevated on.",
+    }),
+  ),
   host: Type.Optional(
     Type.String({
       description: "Exec host/target (auto|sandbox|gateway|node).",
