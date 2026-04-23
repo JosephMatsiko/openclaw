@@ -253,15 +253,16 @@ Nothing is explicitly out of scope for this threat model.
 
 #### T-EXEC-004: Exec Approval Bypass
 
-| Attribute               | Value                                                      |
-| ----------------------- | ---------------------------------------------------------- |
-| **ATLAS ID**            | AML.T0043 - Craft Adversarial Data                         |
-| **Description**         | Attacker crafts commands that bypass approval allowlist    |
-| **Attack Vector**       | Command obfuscation, alias exploitation, path manipulation |
-| **Affected Components** | exec-approvals.ts, command allowlist                       |
-| **Current Mitigations** | Allowlist + ask mode                                       |
-| **Residual Risk**       | High - No command sanitization                             |
-| **Recommendations**     | Implement command normalization, expand blocklist          |
+| Attribute               | Value                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **ATLAS ID**            | AML.T0043 - Craft Adversarial Data                                                                                       |
+| **Description**         | Attacker crafts commands that bypass approval allowlist                                                                  |
+| **Attack Vector**       | Command obfuscation, alias exploitation, path manipulation                                                               |
+| **Affected Components** | exec-approvals.ts, command allowlist, exec broker                                                                        |
+| **Current Mitigations** | Allowlist + ask mode; Phase 1 broker adds ALWAYS_DENIED_BINS (sudo/su/sandbox-exec/…), env redaction, argv0-based policy |
+| **Residual Risk**       | Medium — interpreter inline-eval abuse (python -c, node -e) is residual; broker bypass via pty shell expansion possible  |
+| **Phase 1 Status**      | **Partially mitigated** — spawn-layer broker active (M2); interpreter payload analysis is follow-up                      |
+| **Recommendations**     | Extend broker to detect inline eval patterns; add regression test for T-EXEC-004 harness                                 |
 
 ---
 
@@ -405,15 +406,16 @@ Nothing is explicitly out of scope for this threat model.
 
 #### T-IMPACT-001: Unauthorized Command Execution
 
-| Attribute               | Value                                               |
-| ----------------------- | --------------------------------------------------- |
-| **ATLAS ID**            | AML.T0031 - Erode AI Model Integrity                |
-| **Description**         | Attacker executes arbitrary commands on user system |
-| **Attack Vector**       | Prompt injection combined with exec approval bypass |
-| **Affected Components** | Bash tool, command execution                        |
-| **Current Mitigations** | Exec approvals, Docker sandbox option               |
-| **Residual Risk**       | Critical - Host execution without sandbox           |
-| **Recommendations**     | Default to sandbox, improve approval UX             |
+| Attribute               | Value                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **ATLAS ID**            | AML.T0031 - Erode AI Model Integrity                                                                                                 |
+| **Description**         | Attacker executes arbitrary commands on user system                                                                                  |
+| **Attack Vector**       | Prompt injection combined with exec approval bypass                                                                                  |
+| **Affected Components** | Bash tool, command execution, exec broker                                                                                            |
+| **Current Mitigations** | Exec approvals, Docker sandbox option; Phase 1 broker enforces deny-by-default allowlist, env redaction, sandbox-probe fail-closed   |
+| **Residual Risk**       | High — sandbox not yet mandatory by default; requires OPENCLAW_EXEC_BROKER=1 opt-in; skill exec bypasses broker analysis             |
+| **Phase 1 Status**      | **Mitigated (opt-in)** — broker active when OPENCLAW_EXEC_BROKER=1; default-deny flip deferred until telemetry confirms <1% breakage |
+| **Recommendations**     | Flip to broker-on-by-default in next minor; enforce sandbox.mode=all when broker is active                                           |
 
 #### T-IMPACT-002: Resource Exhaustion (DoS)
 
