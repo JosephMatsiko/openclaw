@@ -144,6 +144,17 @@ export async function askPerplexityChat({ prompt } = {}) {
   }
   const state = await waitComposerReady(tab);
   if (!state.ok) {
+    if (state.reason === "turnstile" || state.reason === "cf-challenge-path") {
+      void import("./apex-cf-signal.mjs")
+        .then((m) =>
+          m.emitCfSignal({
+            domain: "perplexity.ai",
+            reason: state.reason,
+            tabUrl: state.url,
+          }),
+        )
+        .catch(() => {});
+    }
     throw new Error(`perplexity not ready: ${state.reason} url=${state.url}`);
   }
   await submitPrompt(tab, String(prompt));

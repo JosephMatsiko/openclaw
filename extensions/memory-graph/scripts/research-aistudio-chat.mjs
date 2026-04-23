@@ -130,6 +130,17 @@ export async function askAiStudioChat({ prompt } = {}) {
   }
   const state = await waitComposerReady(tab);
   if (!state.ok) {
+    if (state.reason === "turnstile" || state.reason === "cf-challenge-path") {
+      void import("./apex-cf-signal.mjs")
+        .then((m) =>
+          m.emitCfSignal({
+            domain: "aistudio.google.com",
+            reason: state.reason,
+            tabUrl: state.url,
+          }),
+        )
+        .catch(() => {});
+    }
     throw new Error(`aistudio not ready: ${state.reason}`);
   }
   const model = await readCurrentModel(tab);

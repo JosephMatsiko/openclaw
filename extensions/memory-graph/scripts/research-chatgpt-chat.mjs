@@ -135,6 +135,17 @@ export async function askChatGPTChat({ prompt } = {}) {
   }
   const composerState = await waitComposerReady(tab);
   if (!composerState.ok) {
+    if (composerState.reason === "turnstile" || composerState.reason === "cf-challenge-path") {
+      void import("./apex-cf-signal.mjs")
+        .then((m) =>
+          m.emitCfSignal({
+            domain: "chatgpt.com",
+            reason: composerState.reason,
+            tabUrl: composerState.url,
+          }),
+        )
+        .catch(() => {});
+    }
     throw new Error(`chatgpt not ready: reason=${composerState.reason} url=${composerState.url}`);
   }
   const model = await readCurrentModel(tab);

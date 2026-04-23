@@ -132,6 +132,13 @@ export async function askClaudeAiChat({ prompt } = {}) {
   }
   const state = await waitComposerReady(tab);
   if (!state.ok) {
+    if (state.reason === "turnstile" || state.reason === "cf-challenge-path") {
+      void import("./apex-cf-signal.mjs")
+        .then((m) =>
+          m.emitCfSignal({ domain: "claude.ai", reason: state.reason, tabUrl: state.url }),
+        )
+        .catch(() => {});
+    }
     throw new Error(`claude.ai not ready: ${state.reason}`);
   }
   const model = await readCurrentModel(tab);
