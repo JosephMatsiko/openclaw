@@ -1,0 +1,58 @@
+name: Security Phase 1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/process/broker/**"
+      - "src/agents/sandbox/network-profile.ts"
+      - "src/agents/bash-tools.exec.ts"
+      - "test/security/phase1/**"
+      - ".github/workflows/security-phase1.yml"
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+    paths:
+      - "src/process/broker/**"
+      - "src/agents/sandbox/network-profile.ts"
+      - "src/agents/bash-tools.exec.ts"
+      - "test/security/phase1/**"
+      - ".github/workflows/security-phase1.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  red-team:
+    name: Exec broker red-team harness
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ${{ github.repository == 'openclaw/openclaw' && 'blacksmith-16vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Phase 1 red-team tests
+        run: node scripts/run-vitest.mjs run --config test/vitest/vitest.tooling.config.ts test/security/phase1/red-team.test.ts --reporter=verbose
+        env:
+          OPENCLAW_EXEC_BROKER: "1"
