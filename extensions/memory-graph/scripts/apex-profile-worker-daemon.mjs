@@ -29,6 +29,56 @@ import process from "node:process";
 
 const PROFILE = process.env.APEX_CHROME_PROFILE ?? "a";
 
+// Cookie-refresh fold (panel 2026-04-23, Opus CLI + ChatGPT + Perplexity):
+// running cookie-refresh as a standalone watcher was a TCP-mode convenience
+// — it spawned a subprocess with APEX_CHROME_PROFILE=<p> that connected
+// to the already-running Chrome on port 9222/9223/9224 and pushed fresh
+// cookies. This pattern breaks the moment we swap to --remote-debugging-pipe:
+// there is no port to connect to; only the worker that owns the pipe fds
+// can drive Chrome. Rather than fix that after the transport swap, fold
+// cookie-refresh INTO the worker now. Same worker, same CDP connection,
+// hourly setInterval on the already-attached Chrome. Simpler architecture,
+// one fewer watcher, pipe-mode clean.
+const COOKIE_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1h
+let cookieRefreshTimer = null;
+let cookieRefreshInFlight = false;
+
+async function runCookieRefresh() {
+  if (cookieRefreshInFlight) {
+    return;
+  }
+  cookieRefreshInFlight = true;
+  try {
+    const mod = await import("./apex-chrome-cookies-sideload.mjs");
+    const r = await mod.sideloadCookies();
+    process.stderr.write(
+      `[profile-worker profile=${PROFILE}] cookie-refresh pushed=${r.pushed}/${r.total ?? r.pushed}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[profile-worker profile=${PROFILE}] cookie-refresh failed: ${String(err?.message ?? err)}\n`,
+    );
+  } finally {
+    cookieRefreshInFlight = false;
+  }
+}
+
+function startCookieRefresh() {
+  // Kick off a first refresh ~30s after daemon boot (staggered — let the
+  // CDP connection stabilize first), then every hour.
+  setTimeout(() => {
+    void runCookieRefresh();
+  }, 30_000);
+  cookieRefreshTimer = setInterval(() => {
+    void runCookieRefresh();
+  }, COOKIE_REFRESH_INTERVAL_MS);
+  // Don't let the timer keep the process alive on its own — the IPC
+  // channel is the source of truth for daemon lifetime.
+  if (cookieRefreshTimer.unref) {
+    cookieRefreshTimer.unref();
+  }
+}
+
 // Lazy-loaded worker registry. Dynamic import defers loading
 // apex-chrome-cdp.mjs until after APEX_CHROME_PROFILE is read by the
 // child. First call per workerId pays ~200-500ms import; subsequent
@@ -114,3 +164,10 @@ process.on("disconnect", () => {
 });
 
 process.stderr.write(`[profile-worker pid=${process.pid} profile=${PROFILE}] ready\n`);
+
+// Start the in-daemon cookie-refresh schedule. See comment above the
+// refresh helpers for the rationale — this replaces the separate
+// watchers/apex-chrome-cookie-refresh.mjs watcher, which cannot reach
+// the daemon's Chrome in pipe mode (there's no port, and the profile
+// directory is exclusively locked by the daemon's Chrome instance).
+startCookieRefresh();

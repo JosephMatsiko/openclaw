@@ -1,10 +1,26 @@
 #!/usr/bin/env node
+// DEPRECATED (2026-04-23) — folded into apex-profile-worker-daemon.mjs.
+//
+// The original pattern was a standalone watcher that spawned a subprocess
+// per profile with APEX_CHROME_PROFILE=<p> and connected to the per-profile
+// CDP port at 9222/9223/9224. That pattern dies under --remote-debugging-pipe
+// because (a) there's no port to connect to and (b) Chrome's exclusive
+// --user-data-dir lock means a second Chrome can't attach to the profile
+// anyway. The profile-worker-daemon now runs Storage.setCookies on its
+// own hourly setInterval against the CDP connection it already owns.
+//
+// This file is kept as a manual CLI escape hatch — `node ...apex-chrome-cookie-refresh.mjs`
+// still works in TCP mode by spawning sideload subprocesses. It is no
+// longer wired into watchers/index.mjs JOBS. Do not re-wire without
+// re-examining the pipe-mode fold.
+//
+// Original header follows.
+//
 // Apex Chrome cookie refresh — hourly re-sideload of session cookies
 // from Joseph's main Chrome profile into every Apex Chrome profile.
 //
 // Keeps cf_clearance + next-auth session tokens fresh across Apex's
-// multi-profile fleet. Subscribe in `watchers/index.mjs` JOBS array
-// with a 3600s interval.
+// multi-profile fleet.
 
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";

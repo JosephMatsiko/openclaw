@@ -35,6 +35,7 @@ import { runRegistryWatcher } from "../apex-mcp-registry-watcher.mjs";
 import { runCleanup as runProposalCleanup } from "../apex-proposal-cleanup.mjs";
 import { runHandler as runProposerHandler } from "../apex-proposer-handler.mjs";
 import { proposeToTelegram } from "../apex-proposer-telegram.mjs";
+import { runUsageHeat } from "../apex-usage-heat.mjs";
 import { runTrigger as runVanguardTrigger } from "../apex-vanguard-trigger.mjs";
 import { runTrigger as runVideoTrigger } from "../apex-video-trigger.mjs";
 import { runDrafter as runGmailDrafter } from "../gmail-reply-drafter.mjs";
@@ -42,7 +43,13 @@ import { run as runObsidianWriter } from "../obsidian-writer.mjs";
 import { scanOnce as academicScan } from "./academic-watcher.mjs";
 import { scanOnce as agentActivityScan } from "./agent-activity-watcher.mjs";
 import { tick as runApexCapabilityAbsorption } from "./apex-capability-absorption.mjs";
-import { tick as runApexChromeCookieRefresh } from "./apex-chrome-cookie-refresh.mjs";
+// apex-chrome-cookie-refresh folded into apex-profile-worker-daemon 2026-04-23.
+// Reason: standalone watcher spawns a subprocess with APEX_CHROME_PROFILE=<p>
+// that opens its own CDP connection to the per-profile port. That path is
+// TCP-only — in pipe mode Chrome's debugger is reachable only via the pipe
+// fds the daemon owns, and the profile directory is exclusively locked.
+// The daemon now runs sideloadCookies on its own hourly timer against the
+// CDP connection it already has. See apex-profile-worker-daemon.mjs.
 import { tick as runApexChromeFingerprintAudit } from "./apex-chrome-fingerprint-audit.mjs";
 import { tick as runApexChromeSelectorFarm } from "./apex-chrome-selector-farm.mjs";
 import { scanOnce as calendarScan } from "./calendar-watcher.mjs";
@@ -166,6 +173,14 @@ const JOBS = [
     run: () => runDriftScan({ baseline: false, dryRun: false }),
   },
   {
+    // Feedback-writeback edge: rolls apex-graph-usage JSONL events into
+    // per-node heat scores. Daily so daily-digest + drift-scan read a
+    // fresh rollup, not stale deciles.
+    name: "apex-usage-heat",
+    intervalMs: 24 * 60 * 60 * 1000,
+    run: () => runUsageHeat({ dryRun: false }),
+  },
+  {
     name: "apex-daily-digest",
     intervalMs: 24 * 60 * 60 * 1000,
     respectQuietHours: true,
@@ -241,16 +256,12 @@ const JOBS = [
     run: () => runVideoTrigger({ maxPerTick: 2 }),
   },
   {
-    // Hourly re-sideload of session cookies from main Chrome profile
-    // into every Apex Chrome profile. Keeps cf_clearance + next-auth
-    // tokens fresh across the multi-profile fleet.
-    name: "apex-chrome-cookie-refresh",
-    intervalMs: 60 * 60 * 1000,
-    run: () => runApexChromeCookieRefresh(),
-  },
-  {
     // Hourly Apex Chrome fingerprint audit — probes navigator,
     // plugins, WebGL, UA. Drop > 10% score → flag drift via event bus.
+    // (apex-chrome-cookie-refresh folded into apex-profile-worker-daemon
+    // — see that file and the import-block comment above. The daemon
+    // runs Storage.setCookies on its own CDP connection hourly, so the
+    // standalone watcher is redundant.)
     name: "apex-chrome-fingerprint-audit",
     intervalMs: 60 * 60 * 1000,
     run: () => runApexChromeFingerprintAudit(),
