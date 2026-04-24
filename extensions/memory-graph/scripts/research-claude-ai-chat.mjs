@@ -58,7 +58,10 @@ async function submitPrompt(tab, prompt) {
   const insert = await evalInTab(
     tab,
     `
-    var c = document.querySelector('div[contenteditable="true"]') || document.querySelector('textarea');
+    var c = document.querySelector('div[contenteditable="true"][translate="no"]')
+         || document.querySelector('.ProseMirror')
+         || document.querySelector('div[contenteditable="true"]')
+         || document.querySelector('textarea');
     if (!c) return { ok: false, error: "no composer" };
     c.focus();
     if (c.tagName === 'TEXTAREA') {
@@ -76,22 +79,41 @@ async function submitPrompt(tab, prompt) {
   if (!insert.ok || insert.value?.ok === false) {
     throw new Error(`claude.ai insert: ${insert.error ?? insert.value?.error}`);
   }
-  await new Promise((r) => setTimeout(r, 500));
-  const send = await evalInTab(
-    tab,
-    `
-    var b = document.querySelector('button[aria-label*="Send" i]') || document.querySelector('button[data-testid*="send"]') || document.querySelector('button[type="submit"]');
-    if (!b) return { ok: false, error: "no send" };
-    if (b.disabled) return { ok: false, error: "disabled" };
-    b.click();
-    return { ok: true };
-  `,
-  );
-  if (!send.ok || send.value?.ok === false) {
+  // React needs time to settle state before Send enables; scale with prompt size.
+  const settleMs = Math.min(500 + Math.floor(prompt.length / 20), 5000);
+  await new Promise((r) => setTimeout(r, settleMs));
+  // Retry send-click up to 3 times — for long prompts the button stays
+  // disabled briefly after insertText even though the content is valid.
+  let clicked = false;
+  let lastErr = "unknown";
+  for (let attempt = 0; attempt < 3 && !clicked; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    const send = await evalInTab(
+      tab,
+      `
+      var b = document.querySelector('button[aria-label="Send message"]')
+           || document.querySelector('button[aria-label*="Send" i]')
+           || document.querySelector('button[data-testid*="send"]')
+           || document.querySelector('button[type="submit"]');
+      if (!b) return { ok: false, error: "no send btn" };
+      if (b.disabled) return { ok: false, error: "disabled" };
+      b.click();
+      return { ok: true };
+    `,
+    );
+    if (send.ok && send.value?.ok !== false) {
+      clicked = true;
+      break;
+    }
+    lastErr = send.value?.error ?? send.error ?? "unknown";
+  }
+  if (!clicked) {
     try {
       await dispatchKey(tab, "Enter");
     } catch (e) {
-      throw new Error(`claude.ai send: ${send.value?.error}`, { cause: e });
+      throw new Error(`claude.ai send: ${lastErr}`, { cause: e });
     }
   }
 }
@@ -100,9 +122,21 @@ async function readReply(tab) {
   const r = await evalInTab(
     tab,
     `
-    var msgs = document.querySelectorAll('[data-testid*="message"][data-testid*="assistant"], [class*="claude-response" i], [data-is-streaming]');
-    var last = msgs[msgs.length - 1];
-    var text = last ? (last.innerText || last.textContent || "") : "";
+    // Primary: streaming element (present during + briefly after streaming).
+    // Fallbacks exist because claude.ai has rotated these class names multiple
+    // times (font-claude-message → data-is-streaming → data-testid). Include
+    // all historical anchors so future drifts degrade, not break.
+    var el = document.querySelector('[data-is-streaming]');
+    if (!el) {
+      var msgs = document.querySelectorAll(
+        '[data-testid*="message"][data-testid*="assistant"], ' +
+        '[data-message-author-role="assistant"], ' +
+        '.font-claude-message, ' +
+        '[class*="claude-response" i]'
+      );
+      el = msgs[msgs.length - 1];
+    }
+    var text = el ? (el.innerText || el.textContent || "") : "";
     var stop = document.querySelector('button[aria-label*="Stop" i]');
     return { text: text.trim(), streaming: !!stop };
   `,
@@ -113,15 +147,24 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askClaudeAiChat({ prompt } = {}) {
+export async function askClaudeAiChat({ prompt, forceFresh = true } = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askClaudeAiChat: prompt required");
   }
+  // findOrOpenTab reuses existing claude.ai tabs, which can silently append
+  // to a prior conversation or return a stale assistant turn from pollUntilStable.
+  // Force-navigate to /new when forceFresh so every askClaudeAiChat is a fresh thread.
   const tab = await findOrOpenTab({
     urlMatch: CLAUDE_AI_URL_MATCH,
     createUrl: CLAUDE_AI_START_URL,
   });
-  if (tab.created) {
+  if (forceFresh && !tab.created) {
+    // Force-navigate via in-page JS — works across CDP + AppleScript backends
+    // without depending on a driver-level navigate export.
+    await evalInTab(tab, `location.href = ${JSON.stringify(CLAUDE_AI_START_URL)};`);
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  if (tab.created || forceFresh) {
     const ready = await waitForPageReady(tab, {
       timeoutMs: 15000,
       urlIncludes: CLAUDE_AI_URL_MATCH,
@@ -143,7 +186,11 @@ export async function askClaudeAiChat({ prompt } = {}) {
   }
   const model = await readCurrentModel(tab);
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 180_000 });
+  // Long prompts (e.g. pasted audits) can stream for several minutes,
+  // especially on Opus 4.7 Adaptive / reasoning models. 300s accommodates
+  // full architectural reviews; pollUntilStable returns early when the
+  // stream stops anyway.
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: `${MODEL_LABEL} (${model})` };
 }
 
@@ -183,6 +230,7 @@ async function mainCli() {
   const argv = process.argv.slice(2);
   const asJson = argv.includes("--json");
   const ask = argv.includes("--ask");
+  const noFresh = argv.includes("--no-fresh");
   const idx = argv.indexOf("--items");
   const n = idx >= 0 ? Number.parseInt(argv[idx + 1] ?? "5", 10) : 5;
   const text = argv
@@ -190,10 +238,14 @@ async function mainCli() {
     .join(" ")
     .trim();
   if (!text) {
-    console.error("usage: research-claude-ai-chat.mjs [--ask] [--json] [--items N] <text>");
+    console.error(
+      "usage: research-claude-ai-chat.mjs [--ask] [--json] [--items N] [--no-fresh] <text>",
+    );
     process.exit(2);
   }
-  const r = ask ? await askClaudeAiChat({ prompt: text }) : await researchBeat(text, { items: n });
+  const r = ask
+    ? await askClaudeAiChat({ prompt: text, forceFresh: !noFresh })
+    : await researchBeat(text, { items: n });
   console.log(
     asJson
       ? JSON.stringify(r, null, 2)

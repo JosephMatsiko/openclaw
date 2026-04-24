@@ -122,12 +122,18 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askChatGPTChat({ prompt } = {}) {
+export async function askChatGPTChat({ prompt, forceFresh = true } = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askChatGPTChat: prompt required");
   }
   const tab = await findOrOpenTab({ urlMatch: CHATGPT_URL_MATCH, createUrl: CHATGPT_START_URL });
-  if (tab.created) {
+  if (forceFresh && !tab.created) {
+    // Fresh thread per ask — otherwise findOrOpenTab reuses a stale
+    // /c/<conversation-id> tab and pollUntilStable returns the previous reply.
+    await evalInTab(tab, `location.href = ${JSON.stringify(CHATGPT_START_URL)};`);
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  if (tab.created || forceFresh) {
     const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: CHATGPT_URL_MATCH });
     if (!ready) {
       throw new Error("chatgpt.com did not finish loading");
@@ -146,11 +152,28 @@ export async function askChatGPTChat({ prompt } = {}) {
         )
         .catch(() => {});
     }
+    // not-signed-in on Apex Chrome (CDP) is a symptom of cookie drift.
+    // Emit a signal so the cookie-refresh watcher can re-sideload before
+    // the next dispatch, and hint to the caller that fallback to the
+    // AppleScript backend (main Chrome) may succeed.
+    if (composerState.reason === "not-signed-in") {
+      void import("./apex-cf-signal.mjs")
+        .then((m) =>
+          m.emitCfSignal({
+            domain: "chatgpt.com",
+            reason: "not-signed-in",
+            tabUrl: composerState.url,
+          }),
+        )
+        .catch(() => {});
+    }
     throw new Error(`chatgpt not ready: reason=${composerState.reason} url=${composerState.url}`);
   }
   const model = await readCurrentModel(tab);
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 180_000 });
+  // Long prompts with reasoning models (Thinking, o3-style) can stream for
+  // minutes. 300s matches the claude.ai worker's window.
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: `${DEFAULT_MODEL_LABEL} (${model})` };
 }
 
