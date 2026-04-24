@@ -85,16 +85,28 @@ async function probeGemini() {
     { timeoutMs: 45_000 },
   );
   const stdoutTrim = res.stdout.trim();
+  const bundle = res.stderr + "\n" + res.stdout;
+  // Capacity check must run BEFORE the empty-stdout heuristic — a 429
+  // quota error produces empty stdout + the capacity message on stderr,
+  // which would otherwise match looksLikePrompt and be misreported as
+  // "not authenticated" (2026-04-23: observed in the wild).
+  const capacityExhausted =
+    /exhausted your capacity/i.test(bundle) || /TerminalQuotaError|QUOTA_EXHAUSTED/i.test(bundle);
   const looksLikePrompt =
-    /\[y\/n\]/i.test(stdoutTrim) || /\bsign in\b/i.test(stdoutTrim) || stdoutTrim.length === 0;
-  const capacityExhausted = /exhausted your capacity/i.test(res.stderr + "\n" + res.stdout);
+    !capacityExhausted &&
+    (/\[y\/n\]/i.test(stdoutTrim) || /\bsign in\b/i.test(stdoutTrim) || stdoutTrim.length === 0);
+  // Quota-exhausted is not "healthy" for dispatch purposes, but it IS
+  // authenticated — report with a distinct status so operators can
+  // distinguish transient quota from persistent auth failure.
   const healthy = res.ok && !looksLikePrompt && !capacityExhausted;
   let details = "ok (flash)";
   if (!healthy) {
-    if (looksLikePrompt) {
+    if (capacityExhausted) {
+      const m = bundle.match(/reset after (\d+h[\d]*m?[\d]*s?|\d+m[\d]*s?|\d+s)/i);
+      const resetIn = m ? m[1] : "unknown";
+      details = `AUTH OK — flash quota exhausted, resets in ${resetIn}`;
+    } else if (looksLikePrompt) {
       details = "not authenticated — run `gemini` in a terminal once to complete OAuth";
-    } else if (capacityExhausted) {
-      details = "flash quota exhausted — daily limits reset; Pro may still work via --model";
     } else {
       details = `exit=${res.code} ${(res.stderr || res.stdout).slice(0, 160)}`;
     }
