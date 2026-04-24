@@ -163,11 +163,16 @@ export async function askCodex({ prompt, allowSensitive = false } = {}) {
     }
   }
   const tab = await findOrOpenTab({ urlMatch: CODEX_URL_MATCH, createUrl: CODEX_START_URL });
-  if (tab.created) {
-    const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: "chatgpt.com" });
-    if (!ready) {
-      throw new Error("codex did not load");
-    }
+  if (!tab.created) {
+    // Force-navigate to the codex canonical URL. Reused chatgpt.com tabs
+    // parked on /c/<id> or /g/<id> would otherwise append turns into a
+    // prior conversation and confuse the codex lane's model / system prompt.
+    await evalInTab(tab, `location.href = ${JSON.stringify(CODEX_START_URL)};`);
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: "chatgpt.com" });
+  if (!ready) {
+    throw new Error("codex did not load");
   }
   const state = await waitComposerReady(tab);
   if (!state.ok) {
@@ -181,7 +186,9 @@ export async function askCodex({ prompt, allowSensitive = false } = {}) {
     throw new Error(`codex not ready: ${state.reason}`);
   }
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 240_000 });
+  // 300s — align with the rest of the Chrome worker fleet; codex
+  // reasoning streams can run longer than Instant chat.
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: MODEL_LABEL };
 }
 

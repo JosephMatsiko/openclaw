@@ -117,12 +117,16 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askAiStudioChat({ prompt } = {}) {
+export async function askAiStudioChat({ prompt, forceFresh = true } = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askAiStudioChat: prompt required");
   }
   const tab = await findOrOpenTab({ urlMatch: AIS_URL_MATCH, createUrl: AIS_START_URL });
-  if (tab.created) {
+  if (forceFresh && !tab.created) {
+    await evalInTab(tab, `location.href = ${JSON.stringify(AIS_START_URL)};`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (tab.created || forceFresh) {
     const ready = await waitForPageReady(tab, { timeoutMs: 20000, urlIncludes: AIS_URL_MATCH });
     if (!ready) {
       throw new Error("aistudio did not load");
@@ -145,7 +149,8 @@ export async function askAiStudioChat({ prompt } = {}) {
   }
   const model = await readCurrentModel(tab);
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 180_000 });
+  // 300s — AI Studio streams reasoning/thinking for long-prompt 2.5 Pro runs.
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: `${MODEL_LABEL} (${model})` };
 }
 

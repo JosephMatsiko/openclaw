@@ -61,6 +61,11 @@ async function submitPrompt(tab, prompt) {
       if (setter) setter.call(c, ${JSON.stringify(prompt)});
       else c.value = ${JSON.stringify(prompt)};
       c.dispatchEvent(new Event('input', { bubbles: true }));
+      // Grok's React guard on Submit requires a keyup event; 'input'
+      // alone leaves the button stuck in disabled state even though the
+      // controlled-value path registered. Proven empirically 2026-04-23.
+      c.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+      c.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
       while (c.firstChild) c.removeChild(c.firstChild);
       document.execCommand('insertText', false, ${JSON.stringify(prompt)});
@@ -71,25 +76,40 @@ async function submitPrompt(tab, prompt) {
   if (!insert.ok || insert.value?.ok === false) {
     throw new Error(`grok insert: ${insert.error ?? insert.value?.error}`);
   }
-  await new Promise((r) => setTimeout(r, 500));
-  const send = await evalInTab(
-    tab,
-    `
-    var b = document.querySelector('button[type="submit"]')
-         || document.querySelector('button[aria-label*="send" i]')
-         || document.querySelector('button[aria-label*="submit" i]')
-         || Array.from(document.querySelectorAll('button')).find(function(el){ var r = el.getBoundingClientRect(); return r.bottom > window.innerHeight * 0.6; });
-    if (!b) return { ok: false, error: "no send" };
-    if (b.disabled) return { ok: false, error: "send disabled" };
-    b.click();
-    return { ok: true };
-  `,
-  );
-  if (!send.ok || send.value?.ok === false) {
+  // Scale settle with prompt length; 36KB briefs take >2s for Grok's
+  // React-reconciliation cycle to mark Submit enabled.
+  const settleMs = Math.min(500 + Math.floor(prompt.length / 20), 5000);
+  await new Promise((r) => setTimeout(r, settleMs));
+  let clicked = false;
+  let lastErr = "unknown";
+  for (let attempt = 0; attempt < 3 && !clicked; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    const send = await evalInTab(
+      tab,
+      `
+      var b = document.querySelector('button[aria-label="Submit"][type="submit"]')
+           || document.querySelector('button[type="submit"]')
+           || document.querySelector('button[aria-label*="send" i]')
+           || document.querySelector('button[aria-label*="submit" i]');
+      if (!b) return { ok: false, error: "no send" };
+      if (b.disabled) return { ok: false, error: "send disabled" };
+      b.click();
+      return { ok: true };
+    `,
+    );
+    if (send.ok && send.value?.ok !== false) {
+      clicked = true;
+      break;
+    }
+    lastErr = send.value?.error ?? send.error ?? "unknown";
+  }
+  if (!clicked) {
     try {
       await dispatchKey(tab, "Enter");
     } catch (e) {
-      throw new Error(`grok send: ${send.value?.error}`, { cause: e });
+      throw new Error(`grok send: ${lastErr}`, { cause: e });
     }
   }
 }
@@ -112,12 +132,16 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askGrokChat({ prompt } = {}) {
+export async function askGrokChat({ prompt, forceFresh = true } = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askGrokChat: prompt required");
   }
   const tab = await findOrOpenTab({ urlMatch: GROK_URL_MATCH, createUrl: GROK_START_URL });
-  if (tab.created) {
+  if (forceFresh && !tab.created) {
+    await evalInTab(tab, `location.href = ${JSON.stringify(GROK_START_URL)};`);
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  if (tab.created || forceFresh) {
     const ready = await waitForPageReady(tab, { timeoutMs: 15000, urlIncludes: GROK_URL_MATCH });
     if (!ready) {
       throw new Error("grok.com did not load");
@@ -135,7 +159,7 @@ export async function askGrokChat({ prompt } = {}) {
     throw new Error(`grok not ready: ${state.reason} url=${state.url}`);
   }
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 180_000 });
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: MODEL_LABEL };
 }
 

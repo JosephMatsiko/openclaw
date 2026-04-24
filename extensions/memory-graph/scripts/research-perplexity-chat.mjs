@@ -135,10 +135,14 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askPerplexityChat({ prompt } = {}) {
+export async function askPerplexityChat({ prompt, forceFresh = true } = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askPerplexityChat: prompt required");
   }
+  // forceFresh is observed (the block below always navigates). Kept as a
+  // signature option for future opt-out of fresh-thread behavior when
+  // chaining follow-ups in the same conversation.
+  void forceFresh;
   const tab = await findOrOpenTab({ urlMatch: PPLX_URL_MATCH, createUrl: PPLX_START_URL });
   // Always force-navigate to the chat root. Reused tabs may be parked on
   // /library, /search/:id, /collections, /settings — each a different DOM.
@@ -168,7 +172,8 @@ export async function askPerplexityChat({ prompt } = {}) {
     throw new Error(`perplexity not ready: ${state.reason} url=${state.url}`);
   }
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 180_000 });
+  // 300s — Perplexity reasoning/Pro Search takes minutes on long prompts.
+  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
   return { text: text.trim(), modelUsed: DEFAULT_MODEL_LABEL };
 }
 
