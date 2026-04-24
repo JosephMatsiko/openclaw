@@ -34,6 +34,11 @@ const QUOTA_STATE_PATH = join(STATE_DIR, "apex-quota-state.json");
 // Apex-tier model inventory. Each entry has a quota window + rough cap.
 // Peers share answer quality at the tier; a rotation among peers is
 // never a degradation. Within-service downshifts are FORBIDDEN.
+//
+// Naming convention: logical model IDs that reflect the current live
+// SKU on the service. When a service renames (e.g., OpenAI moving from
+// gpt-5 Instant/Thinking to gpt-5.4 on 2026-02-13), update the key here
+// and let the dispatch layer resolve the ID to an API-level model name.
 export const APEX_TIER = {
   "claude-opus-4-7": { service: "claude", window: "max-subscription", capPerWindow: Infinity },
   "gemini-3.1-pro-preview": { service: "gemini-cli", window: "day", capPerWindow: 60 },
@@ -42,7 +47,13 @@ export const APEX_TIER = {
     window: "rolling-soft",
     capPerWindow: 9999,
   },
-  "gpt-5": { service: "chatgpt", window: "3h-rolling", capPerWindow: 60 },
+  // gpt-5.4 supersedes the original gpt-5 Instant/Thinking retired 2026-02-13.
+  // Plus plan's auto-router silently upgrades hard queries to Thinking for
+  // free (doesn't count toward the manual 3k/week Thinking cap).
+  "gpt-5.4": { service: "chatgpt", window: "3h-rolling", capPerWindow: 60 },
+  // Distinct SKU: explicit manual-select Thinking calls (3k/week cap on Plus).
+  // Lives in the REASONING peer group below.
+  "gpt-5.4-thinking": { service: "chatgpt", window: "week", capPerWindow: 3000 },
   "perplexity-pro": { service: "perplexity", window: "day", capPerWindow: 300 },
   "grok-4": { service: "grok", window: "day", capPerWindow: 9999 },
   "claude-opus-via-claude-ai": { service: "claude-ai", window: "day", capPerWindow: 9999 },
@@ -51,14 +62,41 @@ export const APEX_TIER = {
 // Peer groups — rotating within a group preserves tier. Order within a
 // group is not a priority — the policy picks the peer with the most
 // remaining quota in its current window.
+//
+// Group 4 (REASONING): Opus 4.7 adaptive-thinking, Gemini 3.1 Pro Deep
+// Think, and GPT-5.4 Thinking are peers for hard multi-step reasoning
+// (theological exegesis, systematic edges, finance math, long
+// derivations). Adaptive and Deep Think are *modes* on the base models,
+// not separate SKUs — the dispatch layer applies the mode flag when the
+// caller opts into this lane. Quota is shared with the base model's
+// general-lane entry (same physical bucket on the provider side), so
+// decide() treating this group as separate from the general group is an
+// ergonomic labeling, not quota-isolated. GPT-5.4 Thinking is the one
+// peer with its own explicit cap (3k/week manual-select on Plus).
 export const PEER_GROUPS = [
   ["claude-opus-4-7", "claude-opus-via-claude-ai"],
   ["gemini-3.1-pro-preview", "gemini-3.1-pro-webchat"],
-  ["gpt-5", "claude-opus-4-7", "gemini-3.1-pro-webchat"], // apex-general: any of the three
+  ["gpt-5.4", "claude-opus-4-7", "gemini-3.1-pro-webchat"], // apex-general: any of the three
+  ["claude-opus-4-7", "gemini-3.1-pro-webchat", "gpt-5.4-thinking"], // apex-reasoning (NEW)
 ];
 
+// Convenience accessor: the reasoning peer group, for callers that want
+// to opt in explicitly (e.g., `withPolicy({ target: "claude-opus-4-7",
+// peerGroup: REASONING_PEER_GROUP, lane: "reasoning" }, ...)`). The
+// dispatch layer is responsible for applying the reasoning-mode flag
+// (thinking=adaptive on Opus, Deep Think on Gemini) — policy.mjs only
+// names peers + enforces no-degrade.
+export const REASONING_PEER_GROUP = PEER_GROUPS[3];
+
+// Forbidden swaps guard general-lane callers from silent degrade. A
+// reasoning-lane caller opts in via peerGroup explicitly and is outside
+// the scope of this rule — the two concerns are decoupled (Opus 2026-04-23).
+//
+// 2026-02-13 sweep: retired models (o3, gpt-4o, gpt-4o-mini, gpt-4,
+// o1-mini) removed. gpt-5.4-mini and gpt-5.3-instant are the current
+// live degrades the rule actually needs to protect against.
 export const SUB_TIER_FORBIDDEN_SWAPS = {
-  "gpt-5": ["o3", "gpt-4o", "gpt-4o-mini", "gpt-4", "o1-mini"],
+  "gpt-5.4": ["gpt-5.4-mini", "gpt-5.3-instant"],
   "claude-opus-4-7": ["claude-sonnet-4-6", "claude-haiku-4-5"],
   "gemini-3.1-pro-preview": ["gemini-3.1-flash-preview", "gemini-2.5-flash"],
   "perplexity-pro": ["perplexity-standard"],

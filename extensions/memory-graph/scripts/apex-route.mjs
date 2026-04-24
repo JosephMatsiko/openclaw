@@ -276,10 +276,10 @@ async function handleAsk({ text, claims, summaries, single = false }) {
     {
       id: "chatgpt-plus",
       probeKey: "chatgpt",
-      policyTarget: "gpt-5",
+      policyTarget: "gpt-5.4",
       ask: async ({ prompt }) =>
         withPolicy(
-          { target: "gpt-5", prompt },
+          { target: "gpt-5.4", prompt },
           async ({ prompt }) => await askChatGPTChat({ prompt }),
         ),
     },
