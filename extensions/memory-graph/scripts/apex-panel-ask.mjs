@@ -60,6 +60,18 @@ const VOICES = {
     modelName: "gemini-3.1-pro",
     run: runGeminiCli,
   },
+  // Codex CLI (OpenAI's code-tuned model family). Added 2026-04-23
+  // when Joseph flagged it was missing from the panel. Uses the
+  // ~/.openclaw/bin/codex wrapper which locates Codex.app via the
+  // macOS AppTranslocation filesystem glob — no PATH dependency.
+  // Value-add over chatgpt-web: Codex actually reads the local repo
+  // via `rg` / file-exec tools during review, grounds its advice in
+  // real code at file:line precision.
+  codex: {
+    label: "Codex-CLI",
+    modelName: "codex/gpt-5.5",
+    run: runCodexCli,
+  },
 };
 
 function parseArgs(argv) {
@@ -117,6 +129,24 @@ async function runClaudeCli(prompt) {
 
 async function runGeminiCli(prompt) {
   return runCli("gemini", ["-p"], prompt);
+}
+
+async function runCodexCli(prompt) {
+  // Stable wrapper at ~/.openclaw/bin/codex handles the ephemeral
+  // AppTranslocation path. Codex's `exec` subcommand is the
+  // non-interactive equivalent of `claude -p` / `gemini -p`.
+  // Parse the raw stdout to extract the assistant's final answer from
+  // Codex's verbose session trace (session metadata header + multiple
+  // codex/exec turns + final answer + `tokens used` footer).
+  const homeDir = process.env.HOME ?? "";
+  const bin = `${homeDir}/.openclaw/bin/codex`;
+  const r = await runCli(bin, ["exec"], prompt);
+  // Extract the final `codex` block — the agent's last message before
+  // `tokens used`. Codex emits multiple codex-turns if it runs exec
+  // steps; only the last is the final answer.
+  const blocks = [...r.text.matchAll(/\ncodex\n([\s\S]*?)(?=\n(?:exec|tokens used|user)\n|$)/g)];
+  const finalText = blocks.length > 0 ? (blocks[blocks.length - 1][1] ?? "").trim() : r.text.trim();
+  return { text: finalText };
 }
 
 async function runCli(bin, args, prompt) {
