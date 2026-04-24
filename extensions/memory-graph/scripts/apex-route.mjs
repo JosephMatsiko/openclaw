@@ -32,13 +32,19 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dispatch } from "./apex-dispatch.mjs";
 import { withPolicy } from "./apex-policy.mjs";
+import { dispatchViaPool } from "./apex-profile-pool.mjs";
+import { chooseProfile, recordOutcome, roundKey } from "./apex-profile-selector.mjs";
 import { deepResearchBeat } from "./deep-research.mjs";
-import { askAiStudioChat } from "./research-aistudio-chat.mjs";
-import { askChatGPTChat } from "./research-chatgpt-chat.mjs";
-import { askClaudeAiChat } from "./research-claude-ai-chat.mjs";
-import { askGrokChat } from "./research-grok-chat.mjs";
-import { askPerplexityChat } from "./research-perplexity-chat.mjs";
 import { probeAll, isHealthy } from "./worker-probe.mjs";
+
+// NOTE: research-*-chat.mjs are NOT imported here. Importing them in the
+// parent process would transitively load apex-chrome-cdp.mjs, which reads
+// APEX_CHROME_PROFILE at module-load and freezes PROFILE_ID. The
+// apex-profile-pool lazy-forks long-running child processes (one per
+// profile a/b/c) with APEX_CHROME_PROFILE set per child — so the CDP
+// module freezes at the right port in each child. Routing through the
+// pool is what enables real multi-profile rotation (Tier-0 hardening,
+// panel-reviewed 2026-04-23).
 
 const HOME = homedir();
 const DB_PATH = join(HOME, ".openclaw", "memory", "graph.sqlite");
@@ -252,7 +258,35 @@ async function handleAsk({ text, claims, summaries, single = false }) {
   // model. Health-gated at dispatch time (skip workers whose probe is
   // DOWN) and policy-wrapped so tier-swaps are never silent.
   const health = await probeAll({ forceRefresh: false });
+  // One round-key per handleAsk call — ensures session-stickiness: all
+  // beats in this N-plex run on the same profile for each given worker
+  // type, while different ask rounds spread profiles a/b/c evenly.
+  const round = roundKey();
+
+  // Chrome-driven workers route via the profile-pool: each job hops to
+  // a child process pinned to one of profile a/b/c, chosen by
+  // apex-profile-selector's session-sticky round-hash. recordOutcome
+  // feeds the cool-off state after each call.
+  const chromeAsk =
+    ({ id, policyTarget }) =>
+    async ({ prompt }) => {
+      const profile = chooseProfile({ workerType: id, roundKey: round });
+      const run = async ({ prompt: p }) =>
+        await dispatchViaPool({ workerId: id, prompt: p, profile });
+      try {
+        const r = policyTarget
+          ? await withPolicy({ target: policyTarget, prompt }, run)
+          : await run({ prompt });
+        recordOutcome({ workerType: id, profile, ok: true });
+        return r;
+      } catch (err) {
+        recordOutcome({ workerType: id, profile, ok: false });
+        throw err;
+      }
+    };
+
   const workerCatalog = [
+    // CLI workers stay in-process — no Chrome profile dependency.
     {
       id: "claude-opus",
       probeKey: "claude",
@@ -273,50 +307,35 @@ async function handleAsk({ text, claims, summaries, single = false }) {
           async ({ prompt }) => await askGeminiPro({ prompt }),
         ),
     },
+    // Chrome-driven workers: route through apex-profile-pool.
     {
       id: "chatgpt-plus",
       probeKey: "chatgpt",
       policyTarget: "gpt-5.4",
-      ask: async ({ prompt }) =>
-        withPolicy(
-          { target: "gpt-5.4", prompt },
-          async ({ prompt }) => await askChatGPTChat({ prompt }),
-        ),
+      ask: chromeAsk({ id: "chatgpt-plus", policyTarget: "gpt-5.4" }),
     },
     {
       id: "perplexity-pro",
       probeKey: "perplexity",
       policyTarget: "perplexity-pro",
-      ask: async ({ prompt }) =>
-        withPolicy(
-          { target: "perplexity-pro", prompt },
-          async ({ prompt }) => await askPerplexityChat({ prompt }),
-        ),
+      ask: chromeAsk({ id: "perplexity-pro", policyTarget: "perplexity-pro" }),
     },
     {
       id: "claude-ai",
       probeKey: "claude-ai",
       policyTarget: "claude-opus-via-claude-ai",
-      ask: async ({ prompt }) =>
-        withPolicy(
-          { target: "claude-opus-via-claude-ai", prompt },
-          async ({ prompt }) => await askClaudeAiChat({ prompt }),
-        ),
+      ask: chromeAsk({ id: "claude-ai", policyTarget: "claude-opus-via-claude-ai" }),
     },
     {
       id: "aistudio",
       probeKey: "aistudio",
       policyTarget: "gemini-3.1-pro-webchat",
-      ask: async ({ prompt }) =>
-        withPolicy(
-          { target: "gemini-3.1-pro-webchat", prompt },
-          async ({ prompt }) => await askAiStudioChat({ prompt }),
-        ),
+      ask: chromeAsk({ id: "aistudio", policyTarget: "gemini-3.1-pro-webchat" }),
     },
     {
       id: "grok",
       probeKey: "grok",
-      ask: async ({ prompt }) => await askGrokChat({ prompt }),
+      ask: chromeAsk({ id: "grok", policyTarget: null }),
     },
   ];
   const workers = workerCatalog.filter((w) => isHealthy(health, w.probeKey));
