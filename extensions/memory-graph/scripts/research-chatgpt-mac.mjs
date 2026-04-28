@@ -28,9 +28,23 @@ const APP_BUNDLE_ID = "com.openai.chat";
 const WINDOW_POS = [120, 40];
 const WINDOW_SIZE = [1100, 800];
 
+// Composer Y bias: ChatGPT.app input field sits ~50px above the window's
+// bottom edge. Earlier fixed value (750) was 40px too high and clicks
+// missed the input element under WebKit, leaving Cmd+V to paste into
+// no-active-field (caught 2026-04-28 panel smoke). Computed dynamically
+// from WINDOW_POS + WINDOW_SIZE so resizing the window relocates the
+// fallback automatically.
+const COMPOSER_Y_OFFSET_FROM_BOTTOM = 50;
+
+function dynamicComposerCenter() {
+  const [px, py] = WINDOW_POS;
+  const [sx, sy] = WINDOW_SIZE;
+  return [px + Math.round(sx / 2), py + sy - COMPOSER_Y_OFFSET_FROM_BOTTOM];
+}
+
 const COORDS = {
   sidebarToggle: [70, 65],
-  composerCenter: [670, 750],
+  composerCenter: dynamicComposerCenter(),
   newChatButton: [385, 65],
   modelPill: [200, 100],
   thinkingToggle: [330, 770],
