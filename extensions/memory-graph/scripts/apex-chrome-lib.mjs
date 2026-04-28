@@ -96,12 +96,15 @@ return out
   const find = await runAppleScript(findScript);
   if (find.ok && find.stdout) {
     const [w, t, winId] = find.stdout.split(",").map(Number);
-    // Activate Chrome but DON'T re-set window index — that's what causes
-    // the index-shift race on parallel voices. The tab is addressed by
-    // window id below, so it doesn't need to be at position 1.
+    // RAISE the window (Chrome throttles background tabs — gemini/aistudio
+    // streaming halts to a crawl if the tab is backgrounded). The raise
+    // shifts other voices' positional indices, but they use `window id`
+    // refs so their handles remain valid. This is the key insight from
+    // V5: keep the raise for tab-priority + stable refs for tab-handle.
     await runAppleScript(`
 tell application "Google Chrome"
   activate
+  set index of window id ${winId} to 1
   set active tab index of window id ${winId} to ${t}
 end tell
 `);
