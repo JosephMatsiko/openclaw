@@ -4212,6 +4212,9 @@ describe("Chuck V2 Surface Atlas", () => {
 
     const aiStudio = surfaceAtlasEntry("aistudio/web");
     expect(aiStudio).toBeTruthy();
+    expect(aiStudio?.forms?.map((form) => form.kind)).toEqual(
+      expect.arrayContaining(["browser-tab", "pwa"]),
+    );
     expect(aiStudio?.controls.map((control) => control.label)).toContain("Run");
     expect(aiStudio?.shortcuts.map((shortcut) => shortcut.keys)).toEqual(
       expect.arrayContaining(["Command+Enter", "Control+Enter"]),
@@ -4220,6 +4223,10 @@ describe("Chuck V2 Surface Atlas", () => {
 
     const perplexity = surfaceAtlasEntry("perplexity/mac-app");
     expect(perplexity).toBeTruthy();
+    expect(perplexity?.forms?.[0]).toMatchObject({
+      kind: "native-mac-app",
+      role: "both",
+    });
     expect(perplexity?.leasePolicy).toMatchObject({
       mode: "singleton-incognito-lane",
       keepOpenDuringActiveWork: true,
@@ -4236,6 +4243,7 @@ describe("Chuck V2 Surface Atlas", () => {
     expect(perplexity?.masteryGaps.join("\n")).toContain("Repair answer extraction");
 
     const claudeMac = surfaceAtlasEntry("claude/mac-app");
+    expect(claudeMac?.forms?.map((form) => form.kind)).toContain("native-mac-app");
     expect(claudeMac?.controls.map((control) => control.id)).toEqual(
       expect.arrayContaining(["claude-mode-chat", "claude-mode-cowork", "claude-mode-code"]),
     );
@@ -4262,6 +4270,7 @@ describe("Chuck V2 Surface Atlas", () => {
       },
     );
     expect(text).toContain("Chuck Surface Atlas");
+    expect(text).toContain("forms: native-mac-app/both");
     expect(text).toContain("singleton-incognito-lane");
     expect(text).toContain("keep-open=yes");
     expect(text).toContain("Repair answer extraction");

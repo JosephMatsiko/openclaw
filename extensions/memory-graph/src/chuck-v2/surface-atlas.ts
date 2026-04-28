@@ -30,6 +30,18 @@ export type SurfaceToolKind =
   | "browser-cdp"
   | "accessibility"
   | "ocr";
+export type SurfaceFormKind =
+  | "cli"
+  | "native-mac-app"
+  | "browser-tab"
+  | "pwa"
+  | "browser-or-pwa"
+  | "agentic-browser"
+  | "connector"
+  | "plugin"
+  | "mcp"
+  | "local-runtime";
+export type SurfaceFormRole = "automation-substrate" | "human-continuity" | "both";
 export type SurfaceLeaseMode =
   | "none"
   | "cli-ephemeral"
@@ -72,6 +84,13 @@ export type SurfaceToolRoute = {
   notes: string[];
 };
 
+export type SurfaceForm = {
+  kind: SurfaceFormKind;
+  role: SurfaceFormRole;
+  bestFor: string;
+  caveats: string[];
+};
+
 export type SurfaceLeasePolicy = {
   mode: SurfaceLeaseMode;
   keepOpenDuringActiveWork: boolean;
@@ -89,6 +108,7 @@ export type SurfaceAtlasEntry = {
   preferredDriver: SurfaceToolKind;
   primaryScript?: string;
   launchHint: string;
+  forms?: SurfaceForm[];
   controls: SurfaceControl[];
   shortcuts: SurfaceShortcut[];
   abilities: SurfaceAbility[];
@@ -174,6 +194,13 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "cli",
     primaryScript: "extensions/memory-graph/scripts/research-claude.mjs",
     launchHint: "claude CLI in subscription auth context",
+    forms: [
+      form(
+        "cli",
+        "automation-substrate",
+        "repeatable stdout/stderr receipts and repo-safe execution",
+      ),
+    ],
     controls: [
       control(
         "claude-cli-command",
@@ -215,6 +242,15 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-claude-ai-chat.mjs",
     launchHint: "Shared browser cockpit at claude.ai",
+    forms: [
+      form("browser-tab", "automation-substrate", "CDP/DOM extraction and selector proof"),
+      form(
+        "pwa",
+        "human-continuity",
+        "less tab clutter when a stable app-shell session is useful",
+        ["same Anthropic family signal; does not add a family vote"],
+      ),
+    ],
     controls: [
       control("claude-model-menu", "Model menu", "selector", "Read or change Claude model.", {
         selector: '[data-testid*="model"], button[aria-haspopup="menu"]',
@@ -266,6 +302,13 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "computer-use",
     primaryScript: "extensions/memory-graph/scripts/research-claude-mac.mjs",
     launchHint: "Claude Desktop app with explicit mode metadata: chat, cowork, code",
+    forms: [
+      form(
+        "native-mac-app",
+        "both",
+        "mode-specific Claude chat/cowork/code surface when GUI proof is healthy",
+      ),
+    ],
     controls: [
       control(
         "claude-mode-chat",
@@ -328,6 +371,9 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-claude-design.mjs",
     launchHint: "claude.ai/design once installed/enabled",
+    forms: [
+      form("browser-or-pwa", "both", "design-specific Anthropic surface once enabled and proven"),
+    ],
     controls: [
       control("claude-design-new", "New design", "button", "Start a new design project.", {
         selector:
@@ -373,6 +419,16 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-chatgpt-chat.mjs",
     launchHint: "Shared browser cockpit at chatgpt.com",
+    forms: [
+      form(
+        "browser-tab",
+        "automation-substrate",
+        "CDP/DOM extraction and repeatable text receipts",
+      ),
+      form("pwa", "human-continuity", "stable OpenAI chat shell with less tab clutter", [
+        "use only if proof quality matches or exceeds browser-tab route",
+      ]),
+    ],
     controls: [
       control(
         "chatgpt-model-switcher",
@@ -444,6 +500,14 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     primaryScript: "extensions/memory-graph/scripts/research-chatgpt-mac.mjs",
     launchHint:
       "Install ChatGPT.app from https://openai.com/chatgpt/desktop (macOS 14+ Apple Silicon). Native OpenAI client distinct from Codex.app.",
+    forms: [
+      form(
+        "native-mac-app",
+        "both",
+        "native OpenAI features, attachments, voice/desktop affordances, and app continuity",
+        ["requires answer-attribution proof before load-bearing high-stakes use"],
+      ),
+    ],
     controls: [
       control("chatgpt-mac-new", "New chat", "shortcut", "Create a new native app conversation.", {
         shortcut: "Command+N",
@@ -496,6 +560,13 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "cli",
     primaryScript: "extensions/memory-graph/src/chuck-v2/runner-executor.ts",
     launchHint: "codex exec with repo-grounded context",
+    forms: [
+      form(
+        "cli",
+        "automation-substrate",
+        "repo-grounded patch/test/review execution with receipts",
+      ),
+    ],
     controls: [
       control(
         "codex-exec",
@@ -538,6 +609,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "configured",
     preferredDriver: "cli",
     launchHint: "codex exec in review framing",
+    forms: [form("cli", "automation-substrate", "review-only OpenAI family signal")],
     controls: [
       control(
         "codex-review-exec",
@@ -573,6 +645,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "cli",
     primaryScript: "extensions/memory-graph/scripts/research-gemini.mjs",
     launchHint: "Gemini CLI oauth-personal mode",
+    forms: [form("cli", "automation-substrate", "Google-family stdout/stderr receipts")],
     controls: [
       control(
         "gemini-cli-command",
@@ -610,6 +683,14 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-gemini-chat.mjs",
     launchHint: "gemini.google.com or Gemini PWA",
+    forms: [
+      form(
+        "browser-tab",
+        "automation-substrate",
+        "CDP/DOM extraction when selector proof is needed",
+      ),
+      form("pwa", "human-continuity", "dedicated Gemini app-shell continuity without tab clutter"),
+    ],
     controls: [
       control("gemini-send", "Send", "button", "Submit Gemini prompt.", {
         selector:
@@ -652,6 +733,18 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-aistudio-chat.mjs",
     launchHint: "AI Studio web or PWA; Run button is primary submit control",
+    forms: [
+      form(
+        "browser-tab",
+        "automation-substrate",
+        "Run-button proof, model selector reading, and DOM extraction",
+      ),
+      form(
+        "pwa",
+        "human-continuity",
+        "dedicated AI Studio shell when long sessions need continuity",
+      ),
+    ],
     controls: [
       control("aistudio-run", "Run", "button", "Submit prompt; this surface uses Run, not Send.", {
         selector:
@@ -718,6 +811,14 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "computer-use",
     primaryScript: "extensions/memory-graph/scripts/research-perplexity-mac.mjs",
     launchHint: "Perplexity native Mac app, fullscreen preferred, Incognito singleton lane",
+    forms: [
+      form(
+        "native-mac-app",
+        "both",
+        "shared Max-seat Incognito lane with source-heavy research continuity",
+        ["single active lane policy; reuse during active work instead of closing after each run"],
+      ),
+    ],
     controls: [
       control(
         "perplexity-sidebar-toggle",
@@ -829,6 +930,10 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     preferredDriver: "browser-cdp",
     primaryScript: "extensions/memory-graph/scripts/research-perplexity-chat.mjs",
     launchHint: "perplexity.ai in shared browser cockpit",
+    forms: [
+      form("browser-tab", "automation-substrate", "DOM/citation extraction fallback"),
+      form("pwa", "human-continuity", "dedicated Perplexity shell if operator later approves it"),
+    ],
     controls: [
       control("perplexity-web-send", "Submit", "button", "Submit prompt.", {
         selector:
@@ -870,6 +975,13 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "planned",
     preferredDriver: "browser-cdp",
     launchHint: "Comet/browser automation candidate",
+    forms: [
+      form(
+        "agentic-browser",
+        "both",
+        "Perplexity-owned browser/computer-use surface once admitted",
+      ),
+    ],
     controls: [],
     shortcuts: [],
     abilities: [
@@ -898,6 +1010,10 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "configured",
     preferredDriver: "browser-cdp",
     launchHint: "Grok web/app when logged in",
+    forms: [
+      form("browser-tab", "automation-substrate", "CDP proof against grok.com or X/Grok web"),
+      form("pwa", "human-continuity", "X/Grok app-shell continuity for live-social context"),
+    ],
     controls: [
       control(
         "grok-submit",
@@ -1278,6 +1394,7 @@ export function surfaceAtlasEntries(
       status: "configured",
       preferredDriver: "script",
       launchHint: "Configured Fleet surface; detailed controls not catalogued yet.",
+      forms: [form("local-runtime", "automation-substrate", "configured runner adapter")],
       controls: [
         control("surface-runner", "Runner", "command", "Invoke configured runner adapter.", {
           risk: "low",
@@ -1381,11 +1498,15 @@ export function formatSurfaceAtlasReport(
         .map((shortcutItem) => `${shortcutItem.keys}: ${shortcutItem.action}`)
         .join("; ") || "none";
     const abilities = entry.abilities.map((abilityItem) => abilityItem.label).join(", ") || "none";
+    const forms =
+      entry.forms?.map((surfaceForm) => `${surfaceForm.kind}/${surfaceForm.role}`).join(", ") ||
+      "not catalogued";
     lines.push(
       ...[
         `- ${entry.family} · ${entry.surface} · ${entry.status}`,
         `  label: ${entry.label}`,
         `  driver: ${entry.preferredDriver}${entry.primaryScript ? ` · ${entry.primaryScript}` : ""}`,
+        `  forms: ${forms}`,
         `  lease: ${entry.leasePolicy.mode}; keep-open=${entry.leasePolicy.keepOpenDuringActiveWork ? "yes" : "no"}; return=${entry.leasePolicy.returnRequired ? "yes" : "no"}`,
         ledgerEntry
           ? `  readiness: ${ledgerEntry.readiness}${ledgerEntry.countsAsIndependentFamily ? " · family-count" : ""}; prompt=${ledgerEntry.promptDeliveryProof.verdict}; answer=${ledgerEntry.answerAttributionProof.verdict}`
@@ -1451,6 +1572,15 @@ function route(
   return { route: routeId, toolKind, command, notes };
 }
 
+function form(
+  kind: SurfaceFormKind,
+  role: SurfaceFormRole,
+  bestFor: string,
+  caveats: string[] = [],
+): SurfaceForm {
+  return { kind, role, bestFor, caveats };
+}
+
 function cloneEntry(entry: SurfaceAtlasEntry): SurfaceAtlasEntry {
   return {
     ...entry,
@@ -1461,6 +1591,7 @@ function cloneEntry(entry: SurfaceAtlasEntry): SurfaceAtlasEntry {
       notes: item.notes ? [...item.notes] : undefined,
     })),
     toolRoutes: entry.toolRoutes.map((item) => ({ ...item, notes: [...item.notes] })),
+    forms: entry.forms?.map((item) => ({ ...item, caveats: [...item.caveats] })),
     leasePolicy: { ...entry.leasePolicy, caveats: [...entry.leasePolicy.caveats] },
     knownIssues: [...entry.knownIssues],
     masteryGaps: [...entry.masteryGaps],
