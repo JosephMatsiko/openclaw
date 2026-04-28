@@ -37,12 +37,49 @@ const SURFACE_STATE_DIR = join(
 );
 const ACTIVE_LEASE_PATH = join(SURFACE_STATE_DIR, "active-workstation-lease.json");
 const RECEIPTS_DIR = join(SURFACE_STATE_DIR, "return-receipts");
+// Persistent "current workspace" anchor, refreshed by the watch-current-workspace
+// daemon every WATCH_INTERVAL_MS. restoreWorkstation prefers this over the
+// frozen lease snapshot when the anchor is recent (< ANCHOR_FRESH_MS old).
+const CURRENT_WORKSPACE_PATH = join(SURFACE_STATE_DIR, "current-workspace.json");
+const ANCHOR_FRESH_MS = 5 * 60 * 1000; // 5 minutes
+const WATCH_INTERVAL_MS = 30 * 1000; // 30 seconds
+// PWAs and helper-shell processes that are ALWAYS surface drivers, never
+// Joseph's workspace. The Chrome PWA bundles in ~/Applications/Chrome Apps.localized/
+// have no human-conversation purpose — they exist to be driven. If the
+// frontmost is one of these, the anchor refuses to update. App browsers
+// (Chrome, Safari, Comet, Claude, Perplexity) are NOT in this set because
+// Joseph genuinely uses them as his workspace; lease-based gating below
+// handles those without a static blacklist.
+// PWA bundles in ~/Applications/Chrome Apps.localized/ + the loader shell.
+// These are surface DRIVERS, not Joseph's workspace — anchor watcher excludes
+// them from "Joseph's workspace" classification. As Joseph installs more
+// PWAs (Claude, X for Grok, etc.), add their bundle names here.
+const SURFACE_APPS = new Set([
+  "ChatGPT",
+  "Gemini",
+  "Google AI Studio",
+  "Claude Design",
+  "Google AI for Developers",
+  "app_mode_loader",
+  "Comet", // Perplexity Comet — agentic browser (Chromium fork). Native app
+  // running; CDP driver build deferred. Anchor excludes it.
+  "X", // X.app native — covers grok-web (audit 2026-04-28: already installed at /Applications/X.app)
+  "ChatGPT Atlas", // optional reinstall — TCC has com.openai.atlas history
+  "NotebookLM", // pending PWA install (used by TTS path)
+  "Sora", // pending PWA install (OpenAI video gen)
+  // Pending installs:
+  "Claude", // Claude.ai PWA — collides with native Claude.app at /Applications/Claude.app; anchor logic must distinguish via path or bundle id (TODO)
+  // Perplexity: NOT in this list. Native Perplexity.app already covers the
+  // surface (via Joseph's therivende shared Max account); PWA is redundant.
+]);
 
 function usage() {
   return [
     "usage:",
     "  chuck-surface-control.mjs frontmost [--json]",
     "  chuck-surface-control.mjs capture-workstation [--json]",
+    "  chuck-surface-control.mjs current-workspace [--json]",
+    "  chuck-surface-control.mjs watch-current-workspace [--interval-ms N]",
     "  chuck-surface-control.mjs lease-start [--reason REASON] [--json]",
     "  chuck-surface-control.mjs lease-status [--json]",
     "  chuck-surface-control.mjs lease-return [--json]",
@@ -208,6 +245,71 @@ function activeWorkstationLease() {
   return readJson(ACTIVE_LEASE_PATH, null);
 }
 
+// Read the persistent workspace anchor (refreshed by watch-current-workspace).
+// Returns null if missing, stale, or pointing at a PWA-shell surface driver.
+function readWorkspaceAnchor() {
+  const anchor = readJson(CURRENT_WORKSPACE_PATH, null);
+  if (!anchor || !anchor.workstation || !anchor.capturedAt) {
+    return null;
+  }
+  const ageMs = Date.now() - new Date(anchor.capturedAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs > ANCHOR_FRESH_MS) {
+    return null;
+  }
+  if (SURFACE_APPS.has(anchor.workstation?.app)) {
+    return null;
+  }
+  return anchor;
+}
+
+async function writeWorkspaceAnchor() {
+  ensureSurfaceStateDir();
+  // Skip writing when a surface task is in flight — the active lease
+  // captured Joseph's real workspace at task-start; the watcher must not
+  // overwrite that with a transient frontmost change caused by the surface
+  // driver itself.
+  const lease = activeWorkstationLease();
+  if (lease?.status === "active") {
+    return { ok: false, reason: "active-lease-in-flight", leaseId: lease.leaseId };
+  }
+  const workstation = await captureWorkstation();
+  // Skip if frontmost is a known PWA-shell driver (these are NEVER Joseph's
+  // workspace, even outside a lease — they only run when Chuck drives them).
+  if (SURFACE_APPS.has(workstation.app)) {
+    return { ok: false, reason: "frontmost-is-surface", workstation };
+  }
+  const anchor = { ...workstation, capturedAt: workstation.capturedAt, workstation };
+  writeJsonAtomic(CURRENT_WORKSPACE_PATH, anchor);
+  return { ok: true, anchor };
+}
+
+async function watchCurrentWorkspace({ intervalMs = WATCH_INTERVAL_MS } = {}) {
+  // Long-running daemon: capture and persist the current workspace every
+  // intervalMs. Designed for launchd. Survives capture failures (per-tick
+  // try/catch) and exits cleanly on SIGTERM/SIGINT.
+  const state = { stopping: false };
+  const stop = () => {
+    state.stopping = true;
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  while (!state.stopping) {
+    try {
+      await writeWorkspaceAnchor();
+    } catch (error) {
+      process.stderr.write(
+        `[chuck-surface-control] watch tick failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+    }
+    // Sleep in 1s slices so SIGTERM is responsive.
+    for (let elapsed = 0; elapsed < intervalMs && !state.stopping; elapsed += 1000) {
+      await sleep(Math.min(1000, intervalMs - elapsed));
+    }
+  }
+}
+
 function writeReturnReceipt(lease, result) {
   ensureSurfaceStateDir();
   const receipt = {
@@ -294,7 +396,11 @@ async function restoreWorkstation(state = {}) {
     return { ok: true, skipped: true, reason: "disabled-by-env" };
   }
   const lease = state?.workstation ? state : null;
-  const target = lease?.workstation ?? state ?? {};
+  // Prefer the live workspace anchor over the frozen lease snapshot:
+  // if Joseph tabbed between firing the surface task and now, the anchor
+  // reflects where he actually is — the lease is where he was.
+  const anchor = process.env.CHUCK_IGNORE_WORKSPACE_ANCHOR === "1" ? null : readWorkspaceAnchor();
+  const target = anchor?.workstation ?? lease?.workstation ?? state ?? {};
   const targetApp = process.env.CHUCK_WORKSTATION_RETURN_APP || target?.app;
   if (!targetApp) {
     return { ok: false, reason: "no target app captured" };
@@ -514,6 +620,17 @@ async function main() {
     printResult({ ok: true, frontmost: await frontmostApp() }, opts.json);
   } else if (cmd === "capture-workstation") {
     printResult({ ok: true, workstation: await captureWorkstation() }, opts.json);
+  } else if (cmd === "current-workspace") {
+    const anchor = readWorkspaceAnchor();
+    printResult({ ok: Boolean(anchor), anchor }, opts.json);
+  } else if (cmd === "watch-current-workspace") {
+    // Long-running daemon (launchd target). Honors --interval-ms.
+    const intervalMs = Number(opts["interval-ms"] ?? WATCH_INTERVAL_MS);
+    process.stderr.write(
+      `[chuck-surface-control] watch-current-workspace started (interval=${intervalMs}ms, anchor=${CURRENT_WORKSPACE_PATH})\n`,
+    );
+    await watchCurrentWorkspace({ intervalMs });
+    process.stderr.write("[chuck-surface-control] watch-current-workspace stopped\n");
   } else if (cmd === "lease-start") {
     printResult(
       { ok: true, lease: await createWorkstationLease({ reason: opts.reason ?? "manual-lease" }) },
@@ -579,6 +696,9 @@ export {
   clickRatio,
   clickText,
   createWorkstationLease,
+  readWorkspaceAnchor,
+  watchCurrentWorkspace,
+  writeWorkspaceAnchor,
   desktopBounds,
   frontmostApp,
   restoreWorkstation,
