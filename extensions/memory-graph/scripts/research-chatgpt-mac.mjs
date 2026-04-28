@@ -6,9 +6,10 @@
 // `chatgpt-web` panel voice. Same GPT-5.5 model, native surface, no
 // Cloudflare/Turnstile/CDP fragility. Mirrors research-claude-mac.mjs.
 //
-// IMPORTANT: COORDS below are INITIAL ESTIMATES — first live invocation
-// will likely require nudging. Keyboard shortcuts (Cmd+N, Cmd+V, Return)
-// are macOS-standard and should hold; coordinate clicks are the fragile axis.
+// COORDS below are fallback coordinates only. The load-bearing path now
+// probes the ChatGPT accessibility tree for real anchors before clicking.
+// Keyboard shortcuts (Cmd+N, Cmd+V, Return) are macOS-standard and should
+// hold; coordinate clicks are the last resort.
 
 import { execFile, spawn } from "node:child_process";
 import { unlinkSync } from "node:fs";
@@ -37,6 +38,7 @@ const COORDS = {
 };
 
 const PROMPT_PREFIX = "[panel-ask]\n\n";
+const SHORT_PROOF_RE = /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/;
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -65,6 +67,188 @@ async function cliclick(cmd, { timeoutMs = 5000 } = {}) {
 async function clickAt([x, y]) {
   await cliclick(`c:${x},${y}`);
   await sleep(150);
+}
+
+function parseUiAnchor(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const parts = text.split("\t");
+  if (parts.length < 5) {
+    return null;
+  }
+  const score = Number.parseInt(parts[0] ?? "", 10);
+  const purpose = parts[1] ?? "";
+  const [xRaw, yRaw] = String(parts[2] ?? "").split(",");
+  const x = Number.parseInt(xRaw ?? "", 10);
+  const y = Number.parseInt(yRaw ?? "", 10);
+  if (!Number.isFinite(score) || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return {
+    purpose,
+    score,
+    point: [x, y],
+    bounds: parts[3] ?? "",
+    role: parts[4] ?? "",
+    label: parts.slice(5).join(" ").trim(),
+  };
+}
+
+async function findUiAnchor(purpose) {
+  const safePurpose = String(purpose).replaceAll('"', "");
+  const script = `
+    on candidateScore(purposeName, roleText, labelText, x, y, w, h)
+      if w < 8 or h < 8 then return -9999
+      set score to 0
+      ignoring case
+        if purposeName is "composer" then
+          if labelText contains "search" then return -9999
+          set hasComposerLabel to false
+          if labelText contains "message" then set hasComposerLabel to true
+          if labelText contains "ask" then set hasComposerLabel to true
+          if labelText contains "prompt" then set hasComposerLabel to true
+          if hasComposerLabel is false and y < 300 then return -9999
+          if roleText contains "text" then set score to score + 45
+          if roleText contains "edit" then set score to score + 25
+          if labelText contains "message" then set score to score + 35
+          if labelText contains "ask" then set score to score + 35
+          if labelText contains "prompt" then set score to score + 30
+          if labelText contains "chatgpt" then set score to score + 10
+          if w > 250 then set score to score + 12
+          if h > 25 then set score to score + 8
+          if y > 350 then set score to score + 14
+        else if purposeName is "new-chat" then
+          set hasNewChatLabel to false
+          if labelText contains "new chat" then set hasNewChatLabel to true
+          if labelText contains "new conversation" then set hasNewChatLabel to true
+          if labelText contains "compose" then set hasNewChatLabel to true
+          if hasNewChatLabel is false then return -9999
+          if roleText contains "button" then set score to score + 30
+          if roleText contains "menu" then set score to score + 12
+          if labelText contains "new chat" then set score to score + 55
+          if labelText contains "new conversation" then set score to score + 55
+          if labelText contains "compose" then set score to score + 20
+          if y < 180 then set score to score + 8
+        else if purposeName is "thinking-toggle" then
+          set hasThinkingLabel to false
+          if labelText contains "think" then set hasThinkingLabel to true
+          if labelText contains "reason" then set hasThinkingLabel to true
+          if labelText contains "deep" then set hasThinkingLabel to true
+          if hasThinkingLabel is false then return -9999
+          if roleText contains "button" then set score to score + 25
+          if labelText contains "think" then set score to score + 55
+          if labelText contains "reason" then set score to score + 35
+          if labelText contains "deep" then set score to score + 15
+          if y > 550 then set score to score + 8
+        end if
+      end ignoring
+      return score
+    end candidateScore
+
+    tell application "System Events" to tell process "${APP_NAME}"
+      set winCount to count of windows
+      if winCount is 0 then return ""
+      set targetWin to window 1
+      set bestScore to -9999
+      set bestX to 0
+      set bestY to 0
+      set bestBounds to ""
+      set bestRole to ""
+      set bestLabel to ""
+      set elems to entire contents of targetWin
+      repeat with e in elems
+        try
+          set roleText to ""
+          set descText to ""
+          set titleText to ""
+          set valueText to ""
+          set helpText to ""
+          try
+            set roleText to role of e as text
+          end try
+          try
+            set roleText to roleText & " " & (role description of e as text)
+          end try
+          try
+            set descText to description of e as text
+          end try
+          try
+            set titleText to title of e as text
+          end try
+          try
+            set valueText to value of e as text
+          end try
+          try
+            set helpText to help of e as text
+          end try
+          set labelText to roleText & " " & descText & " " & titleText & " " & valueText & " " & helpText
+          set p to position of e
+          set s to size of e
+          set x to item 1 of p
+          set y to item 2 of p
+          set w to item 1 of s
+          set h to item 2 of s
+          set score to my candidateScore("${safePurpose}", roleText, labelText, x, y, w, h)
+          if score > bestScore then
+            set bestScore to score
+            set bestX to x + (w / 2)
+            set bestY to y + (h / 2)
+            set bestBounds to (x as integer as text) & "," & (y as integer as text) & "," & (w as integer as text) & "," & (h as integer as text)
+            set bestRole to roleText
+            set bestLabel to labelText
+          end if
+        end try
+      end repeat
+      if bestScore < 20 then return ""
+      return (bestScore as integer as text) & tab & "${safePurpose}" & tab & (bestX as integer as text) & "," & (bestY as integer as text) & tab & bestBounds & tab & bestRole & tab & bestLabel
+    end tell
+  `;
+  try {
+    const raw = await osa(script, { timeoutMs: 12_000 });
+    return parseUiAnchor(raw);
+  } catch (e) {
+    const detail = String(e?.stderr || e?.code || "failed").trim();
+    process.stderr.write(`[chatgpt-mac] findUiAnchor(${purpose}) warning: ${detail}\n`);
+    return null;
+  }
+}
+
+async function chatPaneA11yChildCount({ timeoutMs = 2500 } = {}) {
+  const raw = await osa(
+    `tell application "System Events" to tell process "${APP_NAME}"
+      if (count of windows) is 0 then return "0"
+      return (count of (entire contents of window 1) as text)
+    end tell`,
+    { timeoutMs },
+  ).catch(() => "unknown");
+  const count = Number.parseInt(raw, 10);
+  return { raw, count: Number.isFinite(count) ? count : 0 };
+}
+
+async function clickAnchorOrFallback(purpose, fallback) {
+  const childCount = await chatPaneA11yChildCount();
+  if (childCount.count < 1) {
+    process.stderr.write(
+      `[chatgpt-mac] ${purpose} AX tree unavailable (children=${childCount.raw}); using fallback ${fallback.join(",")}\n`,
+    );
+    await clickAt(fallback);
+    return null;
+  }
+  const anchor = await findUiAnchor(purpose);
+  if (anchor?.point) {
+    process.stderr.write(
+      `[chatgpt-mac] ${purpose} anchor score=${anchor.score} point=${anchor.point.join(",")} role=${anchor.role.slice(0, 80)}\n`,
+    );
+    await clickAt(anchor.point);
+    return anchor;
+  }
+  process.stderr.write(
+    `[chatgpt-mac] ${purpose} anchor unavailable; using fallback ${fallback.join(",")}\n`,
+  );
+  await clickAt(fallback);
+  return null;
 }
 
 async function pbpaste({ timeoutMs = 5000 } = {}) {
@@ -117,10 +301,24 @@ async function writeToCommandStdin(command, args, input, { timeoutMs = 5000 } = 
 }
 
 async function screenshot(path, { timeoutMs = 10_000 } = {}) {
-  await execFileP("/usr/sbin/screencapture", ["-x", path], {
-    timeout: timeoutMs,
-    killSignal: "SIGTERM",
-  });
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await execFileP("/usr/sbin/screencapture", ["-x", path], {
+        timeout: timeoutMs,
+        killSignal: "SIGTERM",
+      });
+      return;
+    } catch (e) {
+      lastError = e;
+      await sleep(300 * attempt);
+    }
+  }
+  const detail = String(lastError?.stderr || lastError?.message || lastError || "").trim();
+  throw new Error(
+    `macOS screenshot capture unavailable for ChatGPT answer extraction (${detail || "unknown screencapture failure"}). Grant Screen Recording to the launching terminal/Codex process or use a non-screenshot extraction path.`,
+    { cause: lastError },
+  );
 }
 
 async function activateApp() {
@@ -134,6 +332,33 @@ async function activateApp() {
   await sleep(1200);
   await osa(`tell application id "${APP_BUNDLE_ID}" to activate`).catch(() => {});
   await sleep(500);
+}
+
+async function countChatGptWindows() {
+  const raw = await osa(
+    `tell application "System Events" to tell process "${APP_NAME}" to get (count of windows as text)`,
+    { timeoutMs: 5000 },
+  ).catch(() => "0");
+  const count = Number.parseInt(raw, 10);
+  return Number.isFinite(count) ? count : 0;
+}
+
+async function ensureConversationWindow() {
+  if ((await countChatGptWindows()) > 0) {
+    return;
+  }
+  try {
+    await osa(
+      `tell application "System Events" to tell process "${APP_NAME}" to click menu item "New Chat" of menu "File" of menu bar 1`,
+      { timeoutMs: 5000 },
+    );
+    await sleep(900);
+  } catch {
+    await cliclick("kd:cmd").catch(() => {});
+    await cliclick("kp:n").catch(() => {});
+    await cliclick("ku:cmd").catch(() => {});
+    await sleep(900);
+  }
 }
 
 async function standardizeWindow() {
@@ -192,7 +417,7 @@ async function newConversation() {
       /* try next */
     }
   }
-  await clickAt(COORDS.newChatButton);
+  await clickAnchorOrFallback("new-chat", COORDS.newChatButton);
   await sleep(700);
 }
 
@@ -209,11 +434,60 @@ async function reloadHome() {
 
 async function toggleThinkingMode() {
   try {
-    await clickAt(COORDS.thinkingToggle);
+    await clickAnchorOrFallback("thinking-toggle", COORDS.thinkingToggle);
     await sleep(250);
   } catch (e) {
     process.stderr.write(`[chatgpt-mac] toggleThinkingMode warning: ${e?.message ?? e}\n`);
   }
+}
+
+async function calibrateChatGPTMac() {
+  await activateApp();
+  await ensureConversationWindow();
+  await standardizeWindow();
+  const chatPaneChildCount = await chatPaneA11yChildCount({ timeoutMs: 8000 });
+  const tmpShot = join(tmpdir(), `chatgpt-mac-calibrate-${Date.now()}.png`);
+  let screenCapture = { ok: false, error: "" };
+  try {
+    await screenshot(tmpShot, { timeoutMs: 5000 });
+    screenCapture = { ok: true, error: "" };
+  } catch (e) {
+    screenCapture = { ok: false, error: e?.message ?? String(e) };
+  } finally {
+    try {
+      unlinkSync(tmpShot);
+    } catch {
+      /* best effort */
+    }
+  }
+  const [composer, newChat, thinkingToggle] =
+    chatPaneChildCount.count > 0
+      ? await Promise.all([
+          findUiAnchor("composer"),
+          findUiAnchor("new-chat"),
+          findUiAnchor("thinking-toggle"),
+        ])
+      : [null, null, null];
+  return {
+    surface: "chatgpt/mac-app",
+    appName: APP_NAME,
+    bundleId: APP_BUNDLE_ID,
+    window: { position: WINDOW_POS, size: WINDOW_SIZE },
+    windows: await countChatGptWindows(),
+    chatPaneA11yChildCount: chatPaneChildCount.raw,
+    screenCapture,
+    anchors: { composer, newChat, thinkingToggle },
+    fallbackCoords: COORDS,
+    loadBearing: Boolean((composer || screenCapture.ok) && screenCapture.ok),
+    caveats: [
+      composer
+        ? "Composer anchor found through macOS Accessibility."
+        : "Composer anchor was not found; driver will fall back to standardized-window coordinates.",
+      screenCapture.ok
+        ? "Screen capture available for answer attribution."
+        : "Screen capture unavailable; answer attribution cannot be proven by this Mac-app driver.",
+    ],
+  };
 }
 
 async function visionAsk({ imagePath, prompt, timeoutMs = 90_000 }) {
@@ -300,6 +574,7 @@ export async function askChatGPTMac({
 
   try {
     await activateApp();
+    await ensureConversationWindow();
     await standardizeWindow();
     await reloadHome();
     await standardizeWindow();
@@ -309,7 +584,7 @@ export async function askChatGPTMac({
     if (thinkingMode) {
       await toggleThinkingMode();
     }
-    await clickAt(COORDS.composerCenter);
+    await clickAnchorOrFallback("composer", COORDS.composerCenter);
     const fullPrompt =
       PROMPT_PREFIX +
       (thinkingMode ? "Please use thinking/reasoning mode for the best quality answer.\n\n" : "") +
@@ -341,11 +616,12 @@ export async function askChatGPTMac({
       process.stderr.write(
         `[chatgpt-mac] tick: len=${state.reply.length} streaming=${state.streaming}\n`,
       );
+      const shortProofToken = SHORT_PROOF_RE.test(state.reply);
       if (
         !state.streaming &&
         state.reply &&
         state.reply === lastReply &&
-        state.reply.length >= 60
+        (state.reply.length >= 60 || shortProofToken)
       ) {
         stableTicks += 1;
         if (stableTicks >= stableTicksRequired) {
@@ -395,11 +671,17 @@ async function mainCli() {
   let prompt = "",
     deleteThread = false,
     thinkingMode = false,
-    pollMs;
+    pollMs,
+    calibrate = false,
+    json = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--prompt" || a === "-p") {
       prompt = args[++i] ?? "";
+    } else if (a === "--calibrate") {
+      calibrate = true;
+    } else if (a === "--json") {
+      json = true;
     } else if (a === "--delete-thread") {
       deleteThread = true;
     } else if (a === "--thinking") {
@@ -411,9 +693,18 @@ async function mainCli() {
       break;
     }
   }
+  if (calibrate) {
+    const r = await calibrateChatGPTMac();
+    process.stdout.write(
+      json
+        ? `${JSON.stringify(r, null, 2)}\n`
+        : `${r.loadBearing ? "ready" : "coordinate-fallback"}\n`,
+    );
+    return;
+  }
   if (!prompt) {
     console.error(
-      "Usage: research-chatgpt-mac.mjs [--delete-thread] [--thinking] [--poll-ms N] '<prompt>'",
+      "Usage: research-chatgpt-mac.mjs [--calibrate --json] [--delete-thread] [--thinking] [--poll-ms N] '<prompt>'",
     );
     process.exit(2);
   }
@@ -423,7 +714,7 @@ async function mainCli() {
     thinkingMode,
     ...(Number.isFinite(pollMs) ? { pollUntilStableMs: pollMs } : {}),
   });
-  process.stdout.write(r.text + "\n");
+  process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : `${r.text}\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
