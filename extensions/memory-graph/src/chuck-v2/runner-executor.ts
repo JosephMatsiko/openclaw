@@ -287,6 +287,8 @@ export function calibrateRunnerOutput({
   const strictLocalScout = family === "sovereign-local" && surface === "ollama/localhost";
   const literalExactRequested =
     /\b(?:say|reply|return|respond|answer)\s+(?:with\s+)?exactly\b/i.test(promptText);
+  const surfaceProofRequested = /\bSURFACE_PROOF_OK\b/.test(promptText);
+  const surfaceProofTokenPresent = /\bSURFACE_PROOF_OK\b/.test(trimmed);
   const literalProofToken =
     literalExactRequested &&
     /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(trimmed) &&
@@ -300,7 +302,9 @@ export function calibrateRunnerOutput({
   const promptEchoDetected = promptCandidates.some((candidate) =>
     looksLikePromptEcho({ text: trimmed, prompt: candidate }),
   );
-  const formatCompliant = literalProofToken || literalLocalDiagnostic || labelsFound >= 3;
+  const formatCompliant = surfaceProofRequested
+    ? surfaceProofTokenPresent
+    : literalProofToken || literalLocalDiagnostic || labelsFound >= 3;
   const roleplayDriftDetected =
     strictLocalScout &&
     [
@@ -329,6 +333,9 @@ export function calibrateRunnerOutput({
   }
   if (promptEchoDetected) {
     reasons.push("runner returned the prompt text instead of the answer");
+  }
+  if (surfaceProofRequested && !surfaceProofTokenPresent) {
+    reasons.push("runner did not return requested surface proof token");
   }
   if (!formatCompliant) {
     reasons.push("local runner did not follow the required scout structure");

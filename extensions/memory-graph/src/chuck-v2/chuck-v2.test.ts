@@ -2020,6 +2020,29 @@ describe("Chuck V2 runnable loop", () => {
     expect(execution.receipts[0]?.modelVerified).toBe(false);
   });
 
+  test("runner calibration rejects stale surface proof text without requested proof token", () => {
+    const calibration = calibrateRunnerOutput({
+      family: "google",
+      surface: "gemini/web-chat",
+      prompt: "Reply with exactly one short sentence containing SURFACE_PROOF_OK.",
+      text: [
+        "CLAIMS:",
+        "- This looks structured but came from an old thread.",
+        "RISKS:",
+        "- Stale answer could be mistaken for fresh attribution.",
+        "MISSING_EVIDENCE:",
+        "- The requested proof token is absent.",
+        "DEEPEN_NEEDED: no",
+      ].join("\n"),
+    });
+
+    expect(calibration).toMatchObject({
+      verdict: "degraded",
+      formatCompliant: false,
+      reasons: expect.arrayContaining(["runner did not return requested surface proof token"]),
+    });
+  });
+
   test("Ollama scout wrapper forces local diagnostic structure", () => {
     const prompt = buildOllamaScoutPrompt("diagnose the local model");
     expect(prompt).toContain("technical evaluation pass");
