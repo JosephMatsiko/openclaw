@@ -133,8 +133,8 @@ export async function getBackendInfo() {
 // dispatch. The object also exposes the handle's public fields (id,
 // url, title, target) transparently for convenience.
 
-function wrap(backend, handle) {
-  const wrapped = { _backend: backend, handle };
+function wrap(backend, handle, opts = {}) {
+  const wrapped = { _backend: backend, handle, urlMatch: opts.urlMatch };
   if (backend === "cdp" && handle) {
     wrapped.id = handle.id;
     wrapped.url = handle.url;
@@ -149,16 +149,51 @@ function wrap(backend, handle) {
   return wrapped;
 }
 
+// AppleScript "tab N of window M" handles go stale when parallel voices
+// reorder Chrome windows or close tabs (each findOrOpenTab raises its
+// window to front, shifting indices of others). When an op hits the
+// AppleScript -1719 "Invalid index" / "Can't get tab N of window 1"
+// error, refresh the tab's target by URL match and retry once.
+const STALE_HANDLE_RX = /-1719|Invalid index|Can.t get tab|Can.t get window/i;
+
+async function refreshAppleScriptTab(tab) {
+  if (tab?._backend !== "applescript" || !tab.urlMatch) {
+    return tab;
+  }
+  try {
+    const fresh = await applescript.findOrOpenTab({ urlMatch: tab.urlMatch });
+    tab.handle.target = fresh.target;
+    tab.handle.winIdx = fresh.winIdx;
+    tab.handle.tabIdx = fresh.tabIdx;
+    tab.target = fresh.target;
+    tab.winIdx = fresh.winIdx;
+    tab.tabIdx = fresh.tabIdx;
+  } catch {
+    // Best-effort; the next op error will surface if refresh fails too.
+  }
+  return tab;
+}
+
+function isStaleHandleError(result) {
+  if (!result) {
+    return false;
+  }
+  if (result.ok) {
+    return false;
+  }
+  return STALE_HANDLE_RX.test(String(result.error ?? ""));
+}
+
 // ---- Unified API (matches apex-chrome-lib + adds absorbed UI) ---------
 
 export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
   const backend = await pickBackend();
   if (backend === "cdp") {
     const handle = await cdp.findOrOpenTab({ urlMatch, createUrl });
-    return wrap("cdp", handle);
+    return wrap("cdp", handle, { urlMatch });
   }
   const handle = await applescript.findOrOpenTab({ urlMatch, createUrl });
-  return wrap("applescript", handle);
+  return wrap("applescript", handle, { urlMatch });
 }
 
 export async function evalInTab(tab, code) {
@@ -166,7 +201,12 @@ export async function evalInTab(tab, code) {
     return await cdp.evalInTab(tab.handle, code);
   }
   if (tab?._backend === "applescript") {
-    return await applescript.evalInTab(tab.handle.target, code);
+    let r = await applescript.evalInTab(tab.handle.target, code);
+    if (isStaleHandleError(r)) {
+      await refreshAppleScriptTab(tab);
+      r = await applescript.evalInTab(tab.handle.target, code);
+    }
+    return r;
   }
   throw new Error("evalInTab: tab missing _backend tag — was it created via findOrOpenTab?");
 }
@@ -176,6 +216,10 @@ export async function waitForPageReady(tab, opts = {}) {
     return await cdp.waitForPageReady(tab.handle, opts);
   }
   if (tab?._backend === "applescript") {
+    // Refresh once before the wait loop since the tab handle may already
+    // be stale from a prior parallel-voice op. The lib's loop polls
+    // evalInTab internally; one refresh up front covers most races.
+    await refreshAppleScriptTab(tab);
     return await applescript.waitForPageReady(tab.handle.target, opts);
   }
   throw new Error("waitForPageReady: missing _backend tag");
@@ -195,9 +239,12 @@ export async function pollUntilStable({ tab, read, ...rest } = {}) {
   if (tab?._backend === "applescript") {
     return await applescript.pollUntilStable({
       target: tab.handle.target,
-      read: async (t) => {
-        const wrapped = wrap("applescript", { target: t });
-        return await read(wrapped);
+      read: async (_t) => {
+        // Ignore the per-iteration target; refresh the original tab and
+        // pass it forward. This way the read callback's evalInTab calls
+        // hit the freshly-resolved target each tick.
+        await refreshAppleScriptTab(tab);
+        return await read(tab);
       },
       ...rest,
     });
@@ -213,9 +260,7 @@ export async function insertText(tab, text) {
     // AppleScript path doesn't have a direct equivalent; use evalInTab
     // + execCommand('insertText'). Workers should have their own
     // ProseMirror-aware paths in the AppleScript world.
-    return await applescript.evalInTab(
-      tab.handle.target,
-      `
+    const code = `
       var el = document.activeElement;
       if (!el) return { ok: false, error: "no active element" };
       if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
@@ -228,8 +273,13 @@ export async function insertText(tab, text) {
         return { ok: true };
       }
       return { ok: false, error: "insertion failed" };
-    `,
-    );
+    `;
+    let r = await applescript.evalInTab(tab.handle.target, code);
+    if (isStaleHandleError(r)) {
+      await refreshAppleScriptTab(tab);
+      r = await applescript.evalInTab(tab.handle.target, code);
+    }
+    return r;
   }
   throw new Error("insertText: missing _backend tag");
 }
