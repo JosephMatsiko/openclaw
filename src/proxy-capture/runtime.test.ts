@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { finalizeDebugProxyCapture, initializeDebugProxyCapture } from "./runtime.js";
+import {
+  captureHttpExchange,
+  finalizeDebugProxyCapture,
+  initializeDebugProxyCapture,
+} from "./runtime.js";
 
 const storeState = vi.hoisted(() => {
   const events: Record<string, unknown>[] = [];
@@ -55,6 +59,7 @@ describe("debug proxy runtime", () => {
   });
 
   afterEach(() => {
+    finalizeDebugProxyCapture();
     globalThis.fetch = originalFetch;
     for (const key of envKeys) {
       const value = savedEnv[key];
@@ -67,7 +72,7 @@ describe("debug proxy runtime", () => {
   });
 
   it("captures ambient global fetch calls when debug proxy mode is enabled", async () => {
-    globalThis.fetch = vi.fn(async () => ({ status: 200 }) as Response) as typeof fetch;
+    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
 
     initializeDebugProxyCapture("test");
     await globalThis.fetch("https://api.minimax.io/anthropic/messages", {
@@ -75,11 +80,72 @@ describe("debug proxy runtime", () => {
       headers: { "content-type": "application/json" },
       body: '{"input":"hello"}',
     });
+    await new Promise((resolve) => setImmediate(resolve));
     finalizeDebugProxyCapture();
 
     const events = storeState.events.filter((event) => event.sessionId === "runtime-test-session");
     expect(events.some((event) => event.host === "api.minimax.io")).toBe(true);
     expect(events.some((event) => event.kind === "request")).toBe(true);
     expect(events.some((event) => event.kind === "response")).toBe(true);
+  });
+
+  it("reinstalls ambient global fetch capture when fetch changes after initialization", async () => {
+    globalThis.fetch = vi.fn(async () => ({ status: 200 }) as Response) as typeof fetch;
+
+    initializeDebugProxyCapture("test");
+    const replacementFetch = vi.fn(async () => ({ status: 204 }) as Response) as typeof fetch;
+    globalThis.fetch = replacementFetch;
+    initializeDebugProxyCapture("test");
+
+    await globalThis.fetch("https://api.minimax.io/anthropic/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"input":"hello"}',
+    });
+    finalizeDebugProxyCapture();
+
+    expect(replacementFetch).toHaveBeenCalledTimes(1);
+    const events = storeState.events.filter((event) => event.sessionId === "runtime-test-session");
+    expect(events.some((event) => event.host === "api.minimax.io")).toBe(true);
+    expect(events.some((event) => event.kind === "request")).toBe(true);
+    expect(events.some((event) => event.kind === "response" && event.status === 204)).toBe(true);
+  });
+
+  it("redacts sensitive request and response headers before persistence", async () => {
+    initializeDebugProxyCapture("test");
+    captureHttpExchange({
+      url: "https://discord.com/api/v10/gateway/bot",
+      method: "GET",
+      requestHeaders: {
+        Authorization: "Bot discord-token",
+        Cookie: "sid=session-token",
+        "x-api-key": "provider-key",
+        "content-type": "application/json",
+        "x-safe": "visible",
+      },
+      response: new Response("{}", {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "set-cookie": "sid=response-token",
+        },
+      }),
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    finalizeDebugProxyCapture();
+
+    const request = storeState.events.find((event) => event.kind === "request");
+    expect(JSON.parse(String(request?.headersJson))).toMatchObject({
+      Authorization: "[REDACTED]",
+      Cookie: "[REDACTED]",
+      "x-api-key": "[REDACTED]",
+      "content-type": "application/json",
+      "x-safe": "visible",
+    });
+    const response = storeState.events.find((event) => event.kind === "response");
+    expect(JSON.parse(String(response?.headersJson))).toMatchObject({
+      "content-type": "application/json",
+      "set-cookie": "[REDACTED]",
+    });
   });
 });

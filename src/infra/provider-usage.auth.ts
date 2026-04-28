@@ -11,17 +11,16 @@ import { resolveEnvApiKey } from "../agents/model-auth-env.js";
 import { isNonSecretApiKeyMarker } from "../agents/model-auth-markers.js";
 import { resolveUsableCustomProviderApiKey } from "../agents/model-auth.js";
 import { normalizeProviderId } from "../agents/model-selection.js";
-import { loadConfig, type OpenClawConfig } from "../config/config.js";
+import { getRuntimeConfig, type OpenClawConfig } from "../config/config.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import {
   isActivatedManifestOwner,
   passesManifestOwnerBasePolicy,
 } from "../plugins/manifest-owner-policy.js";
-import {
-  loadPluginManifestRegistry,
-  type PluginManifestRecord,
-} from "../plugins/manifest-registry.js";
+import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
+import { loadPluginManifestRegistryForPluginRegistry } from "../plugins/plugin-registry.js";
 import { resolveProviderUsageAuthWithPlugin } from "../plugins/provider-runtime.js";
+import { resolveProviderAuthEnvVarCandidates } from "../secrets/provider-env-vars.js";
 import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
 import { resolveLegacyPiAgentAccessToken } from "./provider-usage.shared.js";
 import type { UsageProviderId } from "./provider-usage.types.js";
@@ -74,6 +73,29 @@ function resolveProviderApiKeyFromConfig(params: {
     }
   }
   return undefined;
+}
+
+function hasProviderAuthEnvCredentialSource(params: {
+  state: UsageAuthState;
+  providerIds: string[];
+}): boolean {
+  const candidates = resolveProviderAuthEnvVarCandidates({
+    config: params.state.cfg,
+    env: {
+      ...(process.env.VITEST ? process.env : {}),
+      ...params.state.env,
+    },
+  });
+  for (const providerId of normalizeProviderIds(params.providerIds)) {
+    const envVars = Object.hasOwn(candidates, providerId) ? candidates[providerId] : undefined;
+    if (!envVars) {
+      continue;
+    }
+    if (envVars.some((envVar) => Boolean(normalizeSecretInput(params.state.env[envVar])))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function resolveProviderApiKeyFromConfigAndStore(params: {
@@ -159,9 +181,10 @@ function resolveUsageCredentialProviderIds(params: {
   const providerIds = new Set(normalizeProviderIds([params.provider]));
   const providerIdSet = new Set(providerIds);
   try {
-    const registry = loadPluginManifestRegistry({
+    const registry = loadPluginManifestRegistryForPluginRegistry({
       config: params.state.cfg,
       env: params.state.env,
+      includeDisabled: true,
     });
     for (const plugin of registry.plugins) {
       const pluginProviderIds = normalizeProviderIds(plugin.providers);
@@ -205,7 +228,7 @@ async function resolveOAuthToken(params: {
     try {
       const resolved = await resolveApiKeyForProfile({
         // Reuse the already-resolved config snapshot for token/ref resolution so
-        // usage snapshots don't trigger a second ambient loadConfig() call.
+        // usage snapshots don't trigger a second ambient getRuntimeConfig() call.
         cfg: params.state.cfg,
         store,
         profileId,
@@ -341,7 +364,7 @@ export async function resolveProviderAuths(params: {
   }
 
   const stateBase = {
-    cfg: params.config ?? loadConfig(),
+    cfg: params.config ?? getRuntimeConfig(),
     env: params.env ?? process.env,
     agentDir: params.agentDir,
   };
@@ -353,16 +376,22 @@ export async function resolveProviderAuths(params: {
   const auths: ProviderAuth[] = [];
 
   for (const provider of params.providers) {
+    const directCredentialState = { ...stateBase, allowAuthProfileStore: false };
     const credentialProviderIds = resolveUsageCredentialProviderIds({
-      state: { ...stateBase, allowAuthProfileStore: false },
+      state: directCredentialState,
       provider,
     });
-    const hasDirectCredentialSource = Boolean(
-      resolveProviderApiKeyFromConfig({
-        state: { ...stateBase, allowAuthProfileStore: false },
+    const hasDirectCredentialSource =
+      Boolean(
+        resolveProviderApiKeyFromConfig({
+          state: directCredentialState,
+          providerIds: credentialProviderIds,
+        }),
+      ) ||
+      hasProviderAuthEnvCredentialSource({
+        state: directCredentialState,
         providerIds: credentialProviderIds,
-      }),
-    );
+      });
     const allowAuthProfileStore =
       !params.skipPluginAuthWithoutCredentialSource ||
       hasDirectCredentialSource ||

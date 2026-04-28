@@ -40,6 +40,7 @@ import {
   getActiveSessionMaintenanceWarning,
   pruneStaleEntries,
   rotateSessionFile,
+  shouldRunSessionEntryMaintenance,
   type ResolvedSessionMaintenanceConfig,
   type SessionMaintenanceWarning,
 } from "./store-maintenance.js";
@@ -237,16 +238,22 @@ async function saveSessionStoreUnlocked(
   normalizeSessionStore(store);
 
   if (!opts?.skipMaintenance) {
-    // Resolve maintenance config once (avoids repeated loadConfig() calls).
+    // Resolve maintenance config once (avoids repeated getRuntimeConfig() calls).
     const maintenance = opts?.maintenanceConfig
       ? { ...opts.maintenanceConfig, ...opts?.maintenanceOverride }
       : { ...resolveMaintenanceConfig(), ...opts?.maintenanceOverride };
     const shouldWarnOnly = maintenance.mode === "warn";
     const beforeCount = Object.keys(store).length;
+    const forceMaintenance = opts?.maintenanceOverride !== undefined;
+    const shouldRunEntryMaintenance = shouldRunSessionEntryMaintenance({
+      entryCount: beforeCount,
+      maxEntries: maintenance.maxEntries,
+      force: forceMaintenance,
+    });
 
     if (shouldWarnOnly) {
       const activeSessionKey = opts?.activeSessionKey?.trim();
-      if (activeSessionKey) {
+      if (activeSessionKey && shouldRunEntryMaintenance) {
         const warning = getActiveSessionMaintenanceWarning({
           store,
           activeSessionKey,
@@ -281,18 +288,32 @@ async function saveSessionStoreUnlocked(
         diskBudget,
       });
     } else {
+      const preserveSessionKeys = opts?.activeSessionKey
+        ? new Set([opts.activeSessionKey])
+        : undefined;
       // Prune stale entries and cap total count before serializing.
       const removedSessionFiles = new Map<string, string | undefined>();
       const pruned = pruneStaleEntries(store, maintenance.pruneAfterMs, {
         onPruned: ({ entry }) => {
           rememberRemovedSessionFile(removedSessionFiles, entry);
         },
+        preserveKeys: preserveSessionKeys,
       });
-      const capped = capEntryCount(store, maintenance.maxEntries, {
-        onCapped: ({ entry }) => {
-          rememberRemovedSessionFile(removedSessionFiles, entry);
-        },
-      });
+      const countAfterPrune = Object.keys(store).length;
+      const shouldRunCapMaintenance =
+        forceMaintenance ||
+        shouldRunSessionEntryMaintenance({
+          entryCount: countAfterPrune,
+          maxEntries: maintenance.maxEntries,
+        });
+      const capped = shouldRunCapMaintenance
+        ? capEntryCount(store, maintenance.maxEntries, {
+            onCapped: ({ entry }) => {
+              rememberRemovedSessionFile(removedSessionFiles, entry);
+            },
+            preserveKeys: preserveSessionKeys,
+          })
+        : 0;
       const archivedDirs = new Set<string>();
       const referencedSessionIds = new Set(
         Object.values(store)
@@ -420,7 +441,7 @@ export async function updateSessionStore<T>(
 ): Promise<T> {
   return await withSessionStoreLock(storePath, async () => {
     // Always re-read inside the lock to avoid clobbering concurrent writers.
-    const store = loadSessionStore(storePath, { skipCache: true });
+    const store = loadSessionStore(storePath, { skipCache: true, clone: false });
     const previousAcpByKey = collectAcpMetadataSnapshot(store);
     const result = await mutator(store);
     preserveExistingAcpMetadata({
@@ -643,7 +664,7 @@ export async function updateSessionStoreEntry(params: {
 }): Promise<SessionEntry | null> {
   const { storePath, sessionKey, update } = params;
   return await withSessionStoreLock(storePath, async () => {
-    const store = loadSessionStore(storePath, { skipCache: true });
+    const store = loadSessionStore(storePath, { skipCache: true, clone: false });
     const resolved = resolveSessionStoreEntry({ store, sessionKey });
     const existing = resolved.existing;
     if (!existing) {
@@ -726,7 +747,6 @@ export async function updateLastRoute(params: {
     const store = loadSessionStore(storePath);
     const resolved = resolveSessionStoreEntry({ store, sessionKey });
     const existing = resolved.existing;
-    const now = Date.now();
     const explicitContext = normalizeDeliveryContext(params.deliveryContext);
     const inlineContext = normalizeDeliveryContext({
       channel,
@@ -772,14 +792,15 @@ export async function updateLastRoute(params: {
         })
       : null;
     const basePatch: Partial<SessionEntry> = {
-      updatedAt: Math.max(existing?.updatedAt ?? 0, now),
       deliveryContext: normalized.deliveryContext,
       lastChannel: normalized.lastChannel,
       lastTo: normalized.lastTo,
       lastAccountId: normalized.lastAccountId,
       lastThreadId: normalized.lastThreadId,
     };
-    const next = mergeSessionEntry(
+    // Route updates must not refresh activity timestamps; idle/daily reset
+    // evaluation relies on updatedAt from actual session turns (#49515).
+    const next = mergeSessionEntryPreserveActivity(
       existing,
       metaPatch ? { ...basePatch, ...metaPatch } : basePatch,
     );

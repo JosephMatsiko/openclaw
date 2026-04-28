@@ -1,3 +1,4 @@
+import { resolveControlUiAuthHeader } from "./control-ui-auth.ts";
 import {
   loadChannels,
   logoutWhatsApp,
@@ -5,7 +6,6 @@ import {
   waitWhatsAppLogin,
   type ChannelsState,
 } from "./controllers/channels.ts";
-import { resolveControlUiAuthHeader } from "./control-ui-auth.ts";
 import { loadConfig, saveConfig, type ConfigState } from "./controllers/config.ts";
 import type { NostrProfile } from "./types.ts";
 import { createNostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
@@ -37,13 +37,20 @@ export async function handleWhatsAppLogout(host: ChannelsActionHost) {
 }
 
 export async function handleChannelConfigSave(host: ChannelsActionHost) {
-  await saveConfig(host as ConfigState);
-  await loadConfig(host as ConfigState);
+  const saved = await saveConfig(host as ConfigState);
+  const saveError = host.lastError;
+  if (!saved) {
+    await loadConfig(host as ConfigState);
+    if (saveError && !host.lastError) {
+      host.lastError = saveError;
+    }
+    return;
+  }
   await loadChannels(host as ChannelsState, true);
 }
 
 export async function handleChannelConfigReload(host: ChannelsActionHost) {
-  await loadConfig(host as ConfigState);
+  await loadConfig(host as ConfigState, { discardPendingChanges: true });
   await loadChannels(host as ChannelsState, true);
 }
 

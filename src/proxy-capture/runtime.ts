@@ -15,9 +15,33 @@ import type {
 } from "./types.js";
 
 const DEBUG_PROXY_FETCH_PATCH_KEY = Symbol.for("openclaw.debugProxy.fetchPatch");
+const REDACTED_CAPTURE_HEADER_VALUE = "[REDACTED]";
+const SENSITIVE_CAPTURE_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "api-key",
+  "apikey",
+  "x-auth-token",
+  "auth-token",
+  "x-access-token",
+  "access-token",
+]);
+const SENSITIVE_CAPTURE_HEADER_NAME_FRAGMENTS = [
+  "api-key",
+  "apikey",
+  "token",
+  "secret",
+  "password",
+  "credential",
+  "session",
+];
 
 type GlobalFetchPatchedState = {
   originalFetch: typeof globalThis.fetch;
+  patchedFetch: typeof globalThis.fetch;
 };
 
 type GlobalFetchPatchTarget = typeof globalThis & {
@@ -55,6 +79,32 @@ function resolveUrlString(input: RequestInfo | URL): string | null {
   return null;
 }
 
+function isSensitiveCaptureHeaderName(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (SENSITIVE_CAPTURE_HEADER_NAMES.has(normalized)) {
+    return true;
+  }
+  return SENSITIVE_CAPTURE_HEADER_NAME_FRAGMENTS.some((fragment) => normalized.includes(fragment));
+}
+
+function redactedCaptureHeaders(
+  headers: Headers | Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!headers) {
+    return undefined;
+  }
+  const entries =
+    headers instanceof Headers ? Array.from(headers.entries()) : Object.entries(headers);
+  const redacted: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    redacted[name] = isSensitiveCaptureHeaderName(name) ? REDACTED_CAPTURE_HEADER_VALUE : value;
+  }
+  return redacted;
+}
+
 function createHttpCaptureEventBase(params: {
   settings: DebugProxySettings;
   rawUrl: string;
@@ -85,15 +135,16 @@ function installDebugProxyGlobalFetchPatch(settings: DebugProxySettings): void {
     return;
   }
   const patched = globalThis as GlobalFetchPatchTarget;
-  if (patched[DEBUG_PROXY_FETCH_PATCH_KEY]) {
+  const existing = patched[DEBUG_PROXY_FETCH_PATCH_KEY];
+  if (existing && globalThis.fetch === existing.patchedFetch) {
     return;
   }
-  const originalFetch = globalThis.fetch.bind(globalThis);
-  patched[DEBUG_PROXY_FETCH_PATCH_KEY] = { originalFetch };
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const originalFetch = globalThis.fetch;
+  const callOriginalFetch = originalFetch.bind(globalThis);
+  const patchedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = resolveUrlString(input);
     try {
-      const response = await originalFetch(input, init);
+      const response = await callOriginalFetch(input, init);
       if (url && /^https?:/i.test(url)) {
         captureHttpExchange({
           url,
@@ -150,6 +201,8 @@ function installDebugProxyGlobalFetchPatch(settings: DebugProxySettings): void {
       throw error;
     }
   }) as typeof globalThis.fetch;
+  patched[DEBUG_PROXY_FETCH_PATCH_KEY] = { originalFetch, patchedFetch };
+  globalThis.fetch = patchedFetch;
 }
 
 function uninstallDebugProxyGlobalFetchPatch(): void {
@@ -158,12 +211,15 @@ function uninstallDebugProxyGlobalFetchPatch(): void {
   if (!state) {
     return;
   }
-  globalThis.fetch = state.originalFetch;
+  if (globalThis.fetch === state.patchedFetch) {
+    globalThis.fetch = state.originalFetch;
+  }
   delete patched[DEBUG_PROXY_FETCH_PATCH_KEY];
 }
 
 export function isDebugProxyGlobalFetchPatchInstalled(): boolean {
-  return Boolean((globalThis as GlobalFetchPatchTarget)[DEBUG_PROXY_FETCH_PATCH_KEY]);
+  const state = (globalThis as GlobalFetchPatchTarget)[DEBUG_PROXY_FETCH_PATCH_KEY];
+  return Boolean(state && globalThis.fetch === state.patchedFetch);
 }
 
 export function initializeDebugProxyCapture(mode: string, resolved?: DebugProxySettings): void {
@@ -237,11 +293,7 @@ export function captureHttpExchange(params: {
       params.requestHeaders instanceof Headers
         ? (params.requestHeaders.get("content-type") ?? undefined)
         : params.requestHeaders?.["content-type"],
-    headersJson: safeJsonString(
-      params.requestHeaders instanceof Headers
-        ? Object.fromEntries(params.requestHeaders.entries())
-        : params.requestHeaders,
-    ),
+    headersJson: safeJsonString(redactedCaptureHeaders(params.requestHeaders)),
     metaJson: safeJsonString(params.meta),
     ...requestPayload,
   });
@@ -268,7 +320,7 @@ export function captureHttpExchange(params: {
           : undefined,
       headersJson:
         params.response.headers && typeof params.response.headers.entries === "function"
-          ? safeJsonString(Object.fromEntries(params.response.headers.entries()))
+          ? safeJsonString(redactedCaptureHeaders(params.response.headers))
           : undefined,
       metaJson: safeJsonString({ ...params.meta, bodyCapture: "unavailable" }),
     });
@@ -295,7 +347,7 @@ export function captureHttpExchange(params: {
         }),
         status: params.response.status,
         contentType: params.response.headers.get("content-type") ?? undefined,
-        headersJson: safeJsonString(Object.fromEntries(params.response.headers.entries())),
+        headersJson: safeJsonString(redactedCaptureHeaders(params.response.headers)),
         metaJson: safeJsonString(params.meta),
         ...responsePayload,
       });
