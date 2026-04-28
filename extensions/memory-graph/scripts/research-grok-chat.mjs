@@ -249,14 +249,54 @@ async function submitPrompt(tab, prompt) {
   }
 }
 
-async function readReply(tab) {
+async function readReply(tab, prompt = "") {
   const r = await evalInTab(
     tab,
     `
-    // Grok renders answers in role=assistant divs or .message-content-like containers
-    var msgs = document.querySelectorAll('[data-message-author-role="assistant"], [class*="message" i][class*="assistant" i], [class*="response" i]');
-    var last = msgs[msgs.length - 1];
-    var text = last ? (last.innerText || last.textContent || "") : "";
+    var promptText = ${JSON.stringify(String(prompt))};
+    var bodyText = document.body.innerText || "";
+    function clean(raw) {
+      var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
+      var out = [];
+      var stop = [
+        /^\\d+(?:\\.\\d+)?\\s*(?:ms|s)$/i,
+        /^clarify\\b/i,
+        /^explore\\b/i,
+        /^expand on\\b/i,
+        /^tell me about\\b/i,
+        /^are you satisfied\\b/i,
+        /^you.ve reached your full speed limit/i,
+        /^try supergrok/i,
+        /^upgrade to supergrok/i,
+        /^fast$/i,
+        /^like$/i,
+        /^dislike$/i,
+        /^share$/i
+      ];
+      for (var line of lines) {
+        if (out.length > 0 && stop.some(function(rx) { return rx.test(line); })) break;
+        out.push(line);
+      }
+      return out.join("\\n").trim();
+    }
+    var text = "";
+    if (promptText) {
+      var idx = bodyText.lastIndexOf(promptText);
+      if (idx >= 0) {
+        text = clean(bodyText.slice(idx + promptText.length));
+      }
+    }
+    if (!text) {
+      var msgs = Array.from(document.querySelectorAll('[data-message-author-role="assistant"], [class*="message" i][class*="assistant" i], [class*="response" i], article, main article'));
+      var promptHead = promptText.slice(0, 120);
+      for (var i = msgs.length - 1; i >= 0; i--) {
+        var candidate = clean(msgs[i].innerText || msgs[i].textContent || "");
+        if (!candidate) continue;
+        if (promptHead && candidate.startsWith(promptHead)) continue;
+        text = candidate;
+        break;
+      }
+    }
     var stop = document.querySelector('button[aria-label*="Stop" i]') || document.querySelector('button[data-testid*="stop"]');
     return { text: text.trim(), streaming: !!stop };
   `,
@@ -294,7 +334,11 @@ export async function askGrokChat({ prompt, forceFresh = true } = {}) {
     throw new Error(`grok not ready: ${state.reason} url=${state.url}`);
   }
   await submitPrompt(tab, String(prompt));
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
+  const text = await pollUntilStable({
+    tab,
+    read: async (activeTab) => await readReply(activeTab, String(prompt)),
+    timeoutMs: 300_000,
+  });
   return { text: text.trim(), modelUsed: MODEL_LABEL };
 }
 

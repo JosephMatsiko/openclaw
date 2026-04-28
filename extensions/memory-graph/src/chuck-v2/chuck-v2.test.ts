@@ -1943,6 +1943,83 @@ describe("Chuck V2 runnable loop", () => {
     });
   });
 
+  test("runner calibration rejects prompt echo before it can count as attribution", async () => {
+    const taskPrompt = "Reply with exactly SURFACE_PROOF_OK.";
+    const grokPlan = {
+      dispatchId: "dispatch-loop-prompt-echo",
+      runId: "loop-prompt-echo",
+      optionKind: "fleet-scout" as const,
+      stage: "scout" as const,
+      schedulingMode: "staggered" as const,
+      lateScoutPolicy: "drop-from-round" as const,
+      independentFamilyCount: 1,
+      skippedSurfaces: [],
+      tasks: [
+        {
+          taskId: "loop-prompt-echo:xai:grok-web-or-app:scout",
+          runId: "loop-prompt-echo",
+          stage: "scout" as const,
+          family: "xai" as const,
+          voice: "grok",
+          surface: "grok/web-or-app",
+          countsAsIndependentFamilySignal: true,
+          familyVoteKey: "xai" as const,
+          prompt: taskPrompt,
+          promptBudgetChars: taskPrompt.length,
+          timeoutMs: 60_000,
+          dropOnTimeout: true,
+          sealed: true,
+          includesPeerOutputs: false,
+          status: "pending" as const,
+        },
+      ],
+    };
+    const deliveredPrompt = [
+      "Do not use tools. Do not inspect files. Answer only from this prompt.",
+      "This is a sealed Scout pass, not a repository exploration or implementation task.",
+      "Do not claim knowledge of repo state, build health, or external facts unless the prompt itself provides that evidence.",
+      "Use this structure:",
+      "CLAIMS:",
+      "- ...",
+      "RISKS:",
+      "- ...",
+      "MISSING_EVIDENCE:",
+      "- ...",
+      "DEEPEN_NEEDED: yes|no",
+      "",
+      taskPrompt,
+    ].join("\n");
+    const execution = await executeFleetDispatchPlan({
+      dispatchPlan: grokPlan,
+      adapters: [
+        createGrokWebRunnerAdapter({
+          command: "fake-node",
+          scriptPath: "/tmp/research-grok-chat.mjs",
+          spawnImpl: fakeSpawn({
+            stdout: JSON.stringify({ text: deliveredPrompt, modelUsed: "grok" }),
+            calls: [],
+          }),
+        }),
+      ],
+      signingSecret: SECRET,
+      now: fixedClock(["2026-04-27T00:00:01.000Z", "2026-04-27T00:00:02.000Z"]),
+    });
+
+    expect(execution.executions[0]).toMatchObject({
+      status: "completed",
+      calibration: {
+        verdict: "degraded",
+        reasons: expect.arrayContaining(["runner returned the prompt text instead of the answer"]),
+      },
+      answerAttributionProof: {
+        verdict: "failed",
+        evidence: "runner output matched the submitted prompt instead of an attributed answer",
+      },
+      countingEligible: false,
+    });
+    expect(execution.receipts[0]?.modelVerified).toBe(false);
+  });
+
   test("Ollama scout wrapper forces local diagnostic structure", () => {
     const prompt = buildOllamaScoutPrompt("diagnose the local model");
     expect(prompt).toContain("technical evaluation pass");

@@ -12,6 +12,7 @@ export type RunnerAdapterOutput = {
   actualFamily: FleetDispatchTask["family"];
   modelClaimed: string;
   modelVerified: boolean;
+  deliveredPrompt?: string;
   authProfileId?: string;
   calibration?: RunnerOutputCalibration;
   promptDeliveryProof?: SurfaceProofRecord;
@@ -145,7 +146,7 @@ async function executeFleetDispatchTask({
         family: output.actualFamily,
         surface: task.surface,
         text: output.text,
-        prompt: task.prompt,
+        prompt: promptsForEchoDetection(task, output),
       });
     const promptDeliveryProof =
       output.promptDeliveryProof ??
@@ -275,15 +276,17 @@ export function calibrateRunnerOutput({
   family: FleetDispatchTask["family"];
   surface: string;
   text: string;
-  prompt?: string;
+  prompt?: string | string[];
 }): RunnerOutputCalibration {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
+  const promptCandidates = normalizePromptCandidates(prompt);
+  const promptText = promptCandidates.join("\n\n");
   const requiredScoutLabels = ["claims:", "risks:", "missing_evidence:", "deepen_needed:"];
   const labelsFound = requiredScoutLabels.filter((label) => lower.includes(label)).length;
   const strictLocalScout = family === "sovereign-local" && surface === "ollama/localhost";
   const literalExactRequested =
-    /\b(?:say|reply|return|respond|answer)\s+(?:with\s+)?exactly\b/i.test(prompt);
+    /\b(?:say|reply|return|respond|answer)\s+(?:with\s+)?exactly\b/i.test(promptText);
   const literalProofToken =
     literalExactRequested &&
     /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(trimmed) &&
@@ -294,6 +297,9 @@ export function calibrateRunnerOutput({
     trimmed.length > 0 &&
     trimmed.length <= 80 &&
     !trimmed.includes("\n");
+  const promptEchoDetected = promptCandidates.some((candidate) =>
+    looksLikePromptEcho({ text: trimmed, prompt: candidate }),
+  );
   const formatCompliant = literalProofToken || literalLocalDiagnostic || labelsFound >= 3;
   const roleplayDriftDetected =
     strictLocalScout &&
@@ -321,6 +327,9 @@ export function calibrateRunnerOutput({
   if (roleplayDriftDetected) {
     reasons.push("local runner drifted into fictional or roleplay framing");
   }
+  if (promptEchoDetected) {
+    reasons.push("runner returned the prompt text instead of the answer");
+  }
   if (!formatCompliant) {
     reasons.push("local runner did not follow the required scout structure");
   }
@@ -340,6 +349,34 @@ export function calibrateRunnerOutput({
     roleplayDriftDetected,
     formatCompliant,
   };
+}
+
+function looksLikePromptEcho({ text, prompt }: { text: string; prompt?: string }): boolean {
+  const normalizedText = normalizeForPromptEcho(text);
+  const normalizedPrompt = normalizeForPromptEcho(prompt ?? "");
+  if (!normalizedText || !normalizedPrompt) {
+    return false;
+  }
+  if (normalizedText === normalizedPrompt) {
+    return true;
+  }
+  if (normalizedPrompt.length >= 120 && normalizedText.startsWith(normalizedPrompt.slice(0, 120))) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeForPromptEcho(value: string): string {
+  return value.replaceAll(/\s+/g, " ").trim();
+}
+
+function normalizePromptCandidates(prompt: string | string[] | undefined): string[] {
+  const candidates = Array.isArray(prompt) ? prompt : [prompt ?? ""];
+  return [...new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean))];
+}
+
+function promptsForEchoDetection(task: FleetDispatchTask, output: RunnerAdapterOutput): string[] {
+  return normalizePromptCandidates([task.prompt, output.deliveredPrompt ?? ""]);
 }
 
 export async function persistFleetDispatchExecution({
@@ -510,13 +547,21 @@ function defaultAnswerAttributionProof({
 }): SurfaceProofRecord {
   const familyMatch = output.actualFamily === task.family;
   const hasText = output.text.trim().length > 0;
+  const promptEchoDetected = promptsForEchoDetection(task, output).some((prompt) =>
+    looksLikePromptEcho({ text: output.text, prompt }),
+  );
   return {
-    verdict: familyMatch && hasText ? "proved" : "failed",
+    verdict: familyMatch && hasText && !promptEchoDetected ? "proved" : "failed",
     method: `runner-adapter:${adapterId}`,
-    evidence: familyMatch
-      ? `answer attributed to ${output.actualFamily}:${task.surface}`
-      : `requested ${task.family}:${task.surface}, got ${output.actualFamily}`,
-    caveats: calibration.verdict === "usable" ? [] : calibration.reasons,
+    evidence: promptEchoDetected
+      ? "runner output matched the submitted prompt instead of an attributed answer"
+      : familyMatch
+        ? `answer attributed to ${output.actualFamily}:${task.surface}`
+        : `requested ${task.family}:${task.surface}, got ${output.actualFamily}`,
+    caveats: [
+      ...(calibration.verdict === "usable" ? [] : calibration.reasons),
+      ...(promptEchoDetected ? ["prompt echo is not answer attribution"] : []),
+    ],
     checkedAt,
   };
 }
@@ -697,10 +742,11 @@ export function createGrokWebRunnerAdapter({
     family: "xai",
     surface: "grok/web-or-app",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--ask", "--json", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "grok/web-or-app",
             baseTimeoutMs: task.timeoutMs,
@@ -719,6 +765,7 @@ export function createGrokWebRunnerAdapter({
         actualFamily: "xai",
         modelClaimed: parsed.modelUsed ?? "grok/web-or-app",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
