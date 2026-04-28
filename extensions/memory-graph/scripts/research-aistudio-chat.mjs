@@ -167,20 +167,24 @@ async function readReply(tab, prompt = "") {
       return /^User\\s+\\d{1,2}:\\d{2}/i.test(text) || isPromptEcho(text);
     }
     var turns = Array.from(document.querySelectorAll('ms-chat-turn'));
-    var texts = turns.map(function(el) {
-      return clean(el.innerText || el.textContent || "");
+    var candidates = turns.map(function(el) {
+      var raw = el.innerText || el.textContent || "";
+      return {
+        raw: raw,
+        text: clean(raw),
+        done: /\\bthumb_up\\b/i.test(raw) || /\\bthumb_down\\b/i.test(raw) || /\\b\\d+(?:\\.\\d+)?\\s*s\\b/i.test(raw)
+      };
     }).filter(function(text) {
-      return text && !/^Thoughts\\b/i.test(text) && !isUserTurn(text);
+      return text.text && !/^Thoughts\\b/i.test(text.text) && !isUserTurn(text.text);
     });
-    var structured = texts.filter(function(text) {
-      return /\\b(SURFACE_PROOF_OK|CLAIMS:|RISKS:|MISSING_EVIDENCE:|DEEPEN_NEEDED:)\\b/i.test(text);
+    var structured = candidates.filter(function(item) {
+      return /\\b(SURFACE_PROOF_OK|CLAIMS:|RISKS:|MISSING_EVIDENCE:|DEEPEN_NEEDED:)\\b/i.test(item.text);
     });
-    var text = (structured.length ? structured[structured.length - 1] : texts[texts.length - 1]) || "";
+    var selected = (structured.length ? structured[structured.length - 1] : candidates[candidates.length - 1]) || { text: "", done: false };
     var body = document.body.innerText || "";
-    var responseReady = /\\bResponse ready\\.?\\b/i.test(body);
     var explicitRunning = /\\bStop\\s+Running\\.\\.\\./i.test(body) ||
       !!document.querySelector('button[aria-label*="Stop" i], [aria-label*="Running" i]');
-    return { text: text.trim(), streaming: explicitRunning && !responseReady };
+    return { text: selected.text.trim(), streaming: explicitRunning || !selected.done };
   `,
   );
   if (!r.ok) {
