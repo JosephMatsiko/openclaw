@@ -45,7 +45,7 @@ export const DEFAULT_CHUCK_CONFIG: ChuckConfig = {
       family: "google",
       voice: "gemini-cli",
       surface: "gemini/cli",
-      rationale: "Google AI Plus subscription surface; useful but quota-sensitive.",
+      rationale: "Google AI Pro subscription surface; useful but quota-sensitive.",
       capabilityProfile: "frontier-reasoning",
       commercialPolicy: "subscription-only",
       quotaPolicy: "scarce",
@@ -142,6 +142,11 @@ export function configWithSafeCliScoutSurfaces(
 ): ChuckConfig {
   const hasSurface = (family: ChuckFamily, surface: string) =>
     config.fleet.some((entry) => entry.family === family && entry.surface === surface);
+  // chatgpt/mac-app = ChatGPT.app native Mac client (download from
+  // openai.com/chatgpt/desktop; not App Store; macOS 14+ Apple Silicon).
+  // Distinct from Codex.app (com.openai.codex) per codex's own confirmation
+  // 2026-04-28. Surface stays in the registry; Joseph can install ChatGPT.app
+  // to make it probable.
   const hasAllConfiguredMembers = [
     ["anthropic", "claude/web-chat"],
     ["anthropic", "claude/mac-app"],
@@ -213,7 +218,7 @@ export function configWithSafeCliScoutSurfaces(
       voice: "chatgpt-mac",
       surface: "chatgpt/mac-app",
       rationale:
-        "ChatGPT Mac app surface; same OpenAI family signal and native-app fallback when web/Codex surfaces diverge.",
+        "ChatGPT.app native Mac client (openai.com/chatgpt/desktop; macOS 14+ Apple Silicon). Distinct from Codex.app per codex 2026-04-28. Driver: accessibility/computer-use against ChatGPT.app's interactive UI. Same OpenAI family signal; native-app fallback when web/Codex surfaces diverge.",
       capabilityProfile: "frontier-reasoning",
     },
     {

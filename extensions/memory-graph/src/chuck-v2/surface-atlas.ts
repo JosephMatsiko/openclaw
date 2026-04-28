@@ -429,6 +429,12 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     notes: ["Primary OpenAI chat surface when available."],
   },
   {
+    // ChatGPT.app native Mac client. Confirmed by codex 2026-04-28:
+    // OpenAI distributes ChatGPT desktop separately at
+    // openai.com/chatgpt/desktop (direct download, not App Store; macOS 14+,
+    // Apple Silicon). Distinct from Codex.app (com.openai.codex). Surface
+    // promotable to load-bearing once the app is installed and the
+    // research-chatgpt-mac.mjs driver can probe its accessibility tree.
     surface: "chatgpt/mac-app",
     family: "openai",
     label: "ChatGPT Mac app",
@@ -436,7 +442,8 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "configured",
     preferredDriver: "computer-use",
     primaryScript: "extensions/memory-graph/scripts/research-chatgpt-mac.mjs",
-    launchHint: "ChatGPT native Mac app",
+    launchHint:
+      "Install ChatGPT.app from https://openai.com/chatgpt/desktop (macOS 14+ Apple Silicon). Native OpenAI client distinct from Codex.app.",
     controls: [
       control("chatgpt-mac-new", "New chat", "shortcut", "Create a new native app conversation.", {
         shortcut: "Command+N",
