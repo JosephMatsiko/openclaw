@@ -90,11 +90,9 @@ export async function isApexChromeUp() {
 
 let bootstrapped = null;
 
-// Headless is a cloaking tell — Cloudflare / Datadome / Akamai flag
-// navigator.webdriver + headless fingerprint within milliseconds. Per
-// sovereignty-hardening: never drive authenticated services from a
-// headless browser. Default to HEADED with anti-detect flags so the
-// Apex Chrome instance looks like any other real Chrome window.
+// Run headed by default so the operator can inspect and recover the
+// browser cockpit. Do not add stealth or anti-detect flags here: Chuck's
+// Kernel policy permits honest browser automation, not cloaking.
 export async function ensureApexChrome({ waitMs = 12000, headless = false } = {}) {
   if (bootstrapped) {
     return bootstrapped;
@@ -121,9 +119,6 @@ export async function ensureApexChrome({ waitMs = 12000, headless = false } = {}
     "--disable-component-update",
     "--disable-popup-blocking",
     "--disable-default-apps",
-    // Anti-detect: hide the automation fingerprint so Cloudflare et al.
-    // don't turnstile us mid-drive.
-    "--disable-blink-features=AutomationControlled",
     "--disable-features=IsolateOrigins,site-per-process,Translate,MediaRouter",
     "--no-service-autorun",
     "--password-store=basic",
