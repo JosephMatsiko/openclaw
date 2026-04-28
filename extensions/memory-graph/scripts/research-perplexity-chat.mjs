@@ -52,7 +52,26 @@ async function waitComposerReady(tab, { timeoutMs = 15000 } = {}) {
   return { ok: false, reason: "timeout" };
 }
 
+// Count perplexity answer turns. Used to gate readReply so the poller
+// only stabilizes once a NEW answer has appeared after submit. Without
+// this gate the reader caught a 19-char fragment ("and execution risk.")
+// from a transient pre-stream DOM state (2026-04-28 smoke).
+const PPLX_ANSWER_SELECTORS = [
+  '[id^="answer-"]',
+  '[data-testid*="answer"]',
+  'main [class*="prose" i]',
+].join(", ");
+
+async function answerCount(tab) {
+  const r = await evalInTab(
+    tab,
+    `return document.querySelectorAll(${JSON.stringify(PPLX_ANSWER_SELECTORS)}).length;`,
+  );
+  return Number(r.value ?? 0);
+}
+
 async function submitPrompt(tab, prompt) {
+  const before = await answerCount(tab);
   const insert = await evalInTab(
     tab,
     `
@@ -105,28 +124,28 @@ async function submitPrompt(tab, prompt) {
       throw new Error(`perplexity send: ${send.error ?? send.value?.error}`, { cause: err });
     }
   }
+  return { before };
 }
 
-async function readReply(tab) {
+async function readReply(tab, { minAnswerCount = 0 } = {}) {
   const r = await evalInTab(
     tab,
     `
-    var candidates = [
-      document.querySelectorAll('[id^="answer-"]'),
-      document.querySelectorAll('[class*="prose" i]'),
-      document.querySelectorAll('article'),
-      document.querySelectorAll('[data-testid*="answer"]'),
-    ];
-    var best = "";
-    for (var i = 0; i < candidates.length; i++) {
-      var list = candidates[i];
-      if (!list || list.length === 0) continue;
-      var last = list[list.length - 1];
-      var txt = (last && (last.innerText || last.textContent)) || "";
-      if (txt.length > best.length) best = txt;
+    var minCount = ${minAnswerCount};
+    var sel = ${JSON.stringify(PPLX_ANSWER_SELECTORS)};
+    var nodes = Array.from(document.querySelectorAll(sel));
+    // The new answer is the last node; require count to advance past
+    // pre-submit baseline so we don't latch onto a transient empty UI.
+    var text = "";
+    if (nodes.length > 0) {
+      var last = nodes[nodes.length - 1];
+      text = (last.innerText || last.textContent || "").trim();
     }
     var stop = document.querySelector('button[aria-label*="Stop" i]') || document.querySelector('button[data-testid*="stop"]');
-    return { text: best, streaming: !!stop };
+    var send = document.querySelector('button[aria-label*="Submit" i]') || document.querySelector('button[type="submit"]');
+    var countReady = nodes.length > minCount;
+    var streaming = !!stop || !countReady || !text || (send && send.disabled && !text);
+    return { text: text, streaming: streaming };
   `,
   );
   if (!r.ok) {
@@ -171,9 +190,13 @@ export async function askPerplexityChat({ prompt, forceFresh = true } = {}) {
     }
     throw new Error(`perplexity not ready: ${state.reason} url=${state.url}`);
   }
-  await submitPrompt(tab, String(prompt));
+  const { before } = await submitPrompt(tab, String(prompt));
   // 300s — Perplexity reasoning/Pro Search takes minutes on long prompts.
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
+  const text = await pollUntilStable({
+    tab,
+    read: async (activeTab) => await readReply(activeTab, { minAnswerCount: before }),
+    timeoutMs: 300_000,
+  });
   return { text: text.trim(), modelUsed: DEFAULT_MODEL_LABEL };
 }
 
