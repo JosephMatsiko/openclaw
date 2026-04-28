@@ -183,8 +183,29 @@ async function realKeyboardSubmit(tab, prompt) {
   }
 }
 
+// Count grok assistant turns. Used to gate readReply so the poller only
+// considers the reader "ready" once a NEW turn has appeared after submit.
+// Without this gate the prompt-echo + suffix-question block in the user
+// bubble can be returned as the "reply" (caught 2026-04-28 smoke).
+const GROK_TURN_SELECTORS = [
+  '[data-message-author-role="assistant"]',
+  '[class*="assistant" i][class*="message" i]',
+  '[class*="response" i][class*="message" i]',
+  "main article",
+  "article",
+].join(", ");
+
+async function assistantCount(tab) {
+  const r = await evalInTab(
+    tab,
+    `return document.querySelectorAll(${JSON.stringify(GROK_TURN_SELECTORS)}).length;`,
+  );
+  return Number(r.value ?? 0);
+}
+
 async function submitPrompt(tab, prompt) {
   await dismissCookieConsent(tab);
+  const before = await assistantCount(tab);
   const insert = await evalInTab(
     tab,
     `
@@ -247,18 +268,20 @@ async function submitPrompt(tab, prompt) {
   if (!clicked) {
     await realKeyboardSubmit(tab, prompt);
   }
+  return { before };
 }
 
-async function readReply(tab, prompt = "") {
+async function readReply(tab, { prompt = "", minAssistantCount = 0 } = {}) {
   const r = await evalInTab(
     tab,
     `
     var promptText = ${JSON.stringify(prompt)};
-    var bodyText = document.body.innerText || "";
+    var minCount = ${minAssistantCount};
+    var turnSel = ${JSON.stringify(GROK_TURN_SELECTORS)};
     function clean(raw) {
       var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
       var out = [];
-      var stop = [
+      var drop = [
         /^\\d+(?:\\.\\d+)?\\s*(?:ms|s)$/i,
         /^clarify\\b/i,
         /^explore\\b/i,
@@ -274,33 +297,35 @@ async function readReply(tab, prompt = "") {
         /^share$/i
       ];
       for (var line of lines) {
-        var isChrome = stop.some(function(rx) { return rx.test(line); });
+        var isChrome = drop.some(function(rx) { return rx.test(line); });
         if (isChrome && out.length === 0) continue;
         if (isChrome && out.length > 0) break;
         out.push(line);
       }
       return out.join("\\n").trim();
     }
-    var text = "";
-    if (promptText) {
-      var idx = bodyText.lastIndexOf(promptText);
-      if (idx >= 0) {
-        text = clean(bodyText.slice(idx + promptText.length));
-      }
+    function isPromptEcho(text) {
+      if (!promptText) return false;
+      var head = promptText.slice(0, 120).replace(/\\s+/g, " ");
+      var t = text.replace(/\\s+/g, " ");
+      return t.startsWith(head);
     }
-    if (!text) {
-      var msgs = Array.from(document.querySelectorAll('[data-message-author-role="assistant"], [class*="message" i][class*="assistant" i], [class*="response" i], article, main article'));
-      var promptHead = promptText.slice(0, 120);
-      for (var i = msgs.length - 1; i >= 0; i--) {
-        var candidate = clean(msgs[i].innerText || msgs[i].textContent || "");
-        if (!candidate) continue;
-        if (promptHead && candidate.startsWith(promptHead)) continue;
-        text = candidate;
-        break;
-      }
+    var msgs = Array.from(document.querySelectorAll(turnSel));
+    // The new assistant turn is everything past minCount. Pick the last
+    // non-prompt-echo candidate.
+    var text = "";
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      var candidate = clean(msgs[i].innerText || msgs[i].textContent || "");
+      if (!candidate) continue;
+      if (isPromptEcho(candidate)) continue;
+      text = candidate;
+      break;
     }
     var stop = document.querySelector('button[aria-label*="Stop" i]') || document.querySelector('button[data-testid*="stop"]');
-    return { text: text.trim(), streaming: !!stop };
+    var send = document.querySelector('button[aria-label="Submit"][type="submit"]') || document.querySelector('button[type="submit"]');
+    var countReady = msgs.length > minCount;
+    var streaming = !!stop || !countReady || !text || (send && send.disabled && !text);
+    return { text: text.trim(), streaming: streaming };
   `,
   );
   if (!r.ok) {
@@ -335,10 +360,11 @@ export async function askGrokChat({ prompt, forceFresh = true } = {}) {
     }
     throw new Error(`grok not ready: ${state.reason} url=${state.url}`);
   }
-  await submitPrompt(tab, String(prompt));
+  const { before } = await submitPrompt(tab, String(prompt));
   const text = await pollUntilStable({
     tab,
-    read: async (activeTab) => await readReply(activeTab, String(prompt)),
+    read: async (activeTab) =>
+      await readReply(activeTab, { prompt: String(prompt), minAssistantCount: before }),
     timeoutMs: 300_000,
   });
   return { text: text.trim(), modelUsed: MODEL_LABEL };
