@@ -3,6 +3,44 @@ import { customElement, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { PhoneGateway, type GatewayEvent, type GatewayStatusDetail } from "./gateway.ts";
 
+// Minimal structural types for the browser SpeechRecognition API so
+// TypeScript stops complaining in strict mode. We only use a tiny
+// surface (start/stop/onresult/onerror/onend).
+type SpeechRecognitionResultItem = { 0: { transcript: string }; isFinal: boolean };
+interface MinimalSpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((ev: { results: ArrayLike<SpeechRecognitionResultItem> }) => void) | null;
+  onerror: ((ev: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  addEventListener(type: "error", listener: () => void): void;
+  start(): void;
+  stop(): void;
+}
+type QuickAction = {
+  id: string;
+  label: string;
+  hint?: string;
+  send: string;
+};
+const QUICK_ACTIONS: QuickAction[] = [
+  { id: "brief", label: "Brief", hint: "today's brief", send: "/apex-brief" },
+  { id: "magazine", label: "Magazine", hint: "today's magazine", send: "/apex-magazine daily" },
+  {
+    id: "pinned",
+    label: "Pinned",
+    hint: "pinned claims",
+    send: "Recall my pinned durable claims (facts, preferences, constraints, open loops). Return 5-10 crisp bullets.",
+  },
+  {
+    id: "vanguard",
+    label: "Vanguard",
+    hint: "last audit",
+    send: "Summarize the last Apex Vanguard run: any ATTENTION flags, drift, tech-debt items.",
+  },
+];
+
 // One message as rendered in the chat list. Keep the shape narrow so we
 // don't need to import the full core message type through the public SDK.
 type ChatMessage = {
@@ -24,6 +62,19 @@ type ChatHistoryEntry = {
   streaming?: boolean;
   tool?: { name?: string };
 };
+
+// Prep text for TTS playback: drop URLs (gets read as "h-t-t-p-s..."),
+// ASCII rulers, and markdown punctuation. Keeps speech natural.
+function stripForTts(raw: string): string {
+  return raw
+    .replaceAll(/\bhttps?:\/\/\S+/g, "")
+    .replaceAll(/={3,}/g, "")
+    .replaceAll(/-{3,}/g, "")
+    .replaceAll(/[*_`]+/g, "")
+    .replaceAll(/\s+/g, " ")
+    .replace(/\s+([,.;:?!])/g, "$1")
+    .trim();
+}
 
 function extractText(entry: ChatHistoryEntry): string {
   if (typeof entry.text === "string") {
@@ -227,6 +278,55 @@ export class ChuckApp extends LitElement {
       color: var(--muted);
       padding: 0 4px;
     }
+    .msg .bubble-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .msg .bubble-actions button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font: 500 11px var(--font-body, inherit);
+      cursor: pointer;
+    }
+    .msg .bubble-actions button:hover {
+      background: var(--bg-elevated);
+      color: var(--text);
+    }
+    .msg .bubble-actions button.speaking {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .quick-actions {
+      display: flex;
+      gap: 6px;
+      padding: 6px 10px;
+      overflow-x: auto;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      -webkit-overflow-scrolling: touch;
+    }
+    .quick-actions button {
+      flex-shrink: 0;
+      background: var(--bg-elevated);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: 500 12px var(--font-body, inherit);
+      cursor: pointer;
+    }
+    .quick-actions button:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .quick-actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     footer {
       border-top: 1px solid var(--border);
       padding: 10px 12px calc(env(safe-area-inset-bottom) + 10px) 12px;
@@ -234,6 +334,35 @@ export class ChuckApp extends LitElement {
       display: flex;
       align-items: flex-end;
       gap: 8px;
+    }
+    footer .mic {
+      height: 42px;
+      width: 42px;
+      padding: 0;
+      background: var(--bg-elevated);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    footer .mic.listening {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%,
+      100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.65;
+      }
+    }
+    footer .mic:disabled {
+      opacity: 0.45;
     }
     footer textarea {
       flex: 1;
@@ -277,8 +406,12 @@ export class ChuckApp extends LitElement {
   @state() private draft = "";
   @state() private sending = false;
   @state() private sessionKey = "agent:main:main";
+  @state() private isListening = false;
+  @state() private speakingId: string | null = null;
 
   private readonly gw = new PhoneGateway();
+  private recognition: MinimalSpeechRecognition | null = null;
+  private synthUtterance: SpeechSynthesisUtterance | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -297,6 +430,187 @@ export class ChuckApp extends LitElement {
     if (qs) {
       this.sessionKey = qs;
     }
+    // Handle chuck://prompt?text=... deep-links (iOS Shortcuts surface).
+    const deepPrompt = url.searchParams.get("prompt");
+    if (deepPrompt) {
+      this.draft = deepPrompt;
+      url.searchParams.delete("prompt");
+      globalThis.history.replaceState(null, "", url.toString());
+    }
+    // Register the service worker for offline shell. Guarded so local dev
+    // without https doesn't 500. Errors are non-fatal.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/m/sw.js").catch(() => {
+        /* non-fatal; shell still works online */
+      });
+    }
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.stopVoiceInput();
+    this.stopSpeaking();
+  }
+
+  // ---- Voice dictation (Gemini-voice is for output; input uses the
+  // browser's free SpeechRecognition: sovereign, local, on-device) ----
+
+  private buildRecognition(): MinimalSpeechRecognition | null {
+    const SR =
+      (
+        globalThis as unknown as {
+          SpeechRecognition?: new () => MinimalSpeechRecognition;
+          webkitSpeechRecognition?: new () => MinimalSpeechRecognition;
+        }
+      ).SpeechRecognition ??
+      (
+        globalThis as unknown as {
+          webkitSpeechRecognition?: new () => MinimalSpeechRecognition;
+        }
+      ).webkitSpeechRecognition;
+    if (!SR) {
+      return null;
+    }
+    const rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.lang = globalThis.navigator?.language ?? "en-US";
+    return rec;
+  }
+
+  private toggleVoiceInput(): void {
+    if (this.isListening) {
+      this.stopVoiceInput();
+      return;
+    }
+    const rec = this.recognition ?? this.buildRecognition();
+    if (!rec) {
+      this.pushSystem("voice dictation unsupported in this browser");
+      return;
+    }
+    this.recognition = rec;
+    const starting = this.draft;
+    rec.onresult = (ev) => {
+      const parts: string[] = [];
+      for (let i = 0; i < ev.results.length; i += 1) {
+        parts.push(ev.results[i][0].transcript);
+      }
+      const joined = parts.join(" ").trim();
+      this.draft = starting ? `${starting} ${joined}` : joined;
+    };
+    rec.addEventListener("error", () => {
+      this.isListening = false;
+    });
+    rec.onend = () => {
+      this.isListening = false;
+    };
+    try {
+      rec.start();
+      this.isListening = true;
+    } catch {
+      this.isListening = false;
+    }
+  }
+
+  private stopVoiceInput(): void {
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch {
+        /* noop */
+      }
+    }
+    this.isListening = false;
+  }
+
+  private async runQuickAction(a: QuickAction): Promise<void> {
+    if (this.status.status !== "ready") {
+      this.pushSystem(`can't run ${a.label}: gateway ${this.status.status}`);
+      return;
+    }
+    this.draft = a.send;
+    await this.send();
+  }
+
+  // ---- Text-to-speech playback (SpeechSynthesis with Google voices) ----
+  //
+  // Per voice preference: Google/Gemini-family voices only, no macOS `say`,
+  // no PAYG. Chrome's Web Speech Synthesis API exposes voices named
+  // "Google US English" / "Google UK English Female" / etc. - those ARE
+  // Google's voice stack, subscription-free, browser-native. We pick the
+  // best available Google voice at speak-time, falling back to the
+  // platform default if the browser has no Google voices loaded (rare on
+  // Chrome; absent on Safari).
+
+  private pickGoogleVoice(): SpeechSynthesisVoice | null {
+    const synth = globalThis.speechSynthesis;
+    if (!synth) {
+      return null;
+    }
+    const voices = synth.getVoices();
+    if (!voices.length) {
+      return null;
+    }
+    const locale = (globalThis.navigator?.language ?? "en-US").toLowerCase();
+    const localeBase = locale.split("-")[0];
+    const google = voices.filter((v) => /^Google\b/i.test(v.name));
+    // Prefer: exact locale > base-language > any Google voice > platform default.
+    const exact = google.find((v) => v.lang.toLowerCase() === locale);
+    if (exact) {
+      return exact;
+    }
+    const baseLang = google.find((v) => v.lang.toLowerCase().startsWith(localeBase));
+    if (baseLang) {
+      return baseLang;
+    }
+    if (google.length > 0) {
+      return google[0];
+    }
+    return voices[0] ?? null;
+  }
+
+  private stopSpeaking(): void {
+    const synth = globalThis.speechSynthesis;
+    if (synth) {
+      synth.cancel();
+    }
+    this.synthUtterance = null;
+    this.speakingId = null;
+  }
+
+  private toggleSpeak(message: ChatMessage): void {
+    const synth = globalThis.speechSynthesis;
+    if (!synth) {
+      this.pushSystem("text-to-speech not supported in this browser");
+      return;
+    }
+    if (this.speakingId === message.id) {
+      this.stopSpeaking();
+      return;
+    }
+    // Stop anything in flight before starting the new utterance.
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(stripForTts(message.text));
+    const voice = this.pickGoogleVoice();
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    }
+    utterance.rate = 1.02;
+    utterance.pitch = 1;
+    utterance.onend = () => {
+      if (this.speakingId === message.id) {
+        this.speakingId = null;
+        this.synthUtterance = null;
+      }
+    };
+    utterance.addEventListener("error", () => {
+      this.speakingId = null;
+      this.synthUtterance = null;
+    });
+    this.synthUtterance = utterance;
+    this.speakingId = message.id;
+    synth.speak(utterance);
   }
 
   private async loadHistory(): Promise<void> {
@@ -516,11 +830,47 @@ export class ChuckApp extends LitElement {
                 ? html`<div class="meta">tool · ${m.toolName ?? "unknown"}</div>`
                 : nothing}
               <div class="bubble ${m.streaming ? "streaming" : ""}">${m.text}</div>
+              ${m.role === "assistant" && !m.streaming && m.text
+                ? html`
+                    <div class="bubble-actions">
+                      <button
+                        class=${this.speakingId === m.id ? "speaking" : ""}
+                        title=${this.speakingId === m.id
+                          ? "stop reading"
+                          : "read aloud (Google voice)"}
+                        @click=${() => this.toggleSpeak(m)}
+                      >
+                        ${this.speakingId === m.id ? "stop" : "play"}
+                      </button>
+                    </div>
+                  `
+                : nothing}
             </div>
           `,
         )}
       </main>
+      <div class="quick-actions">
+        ${QUICK_ACTIONS.map(
+          (a) => html`
+            <button
+              ?disabled=${this.status.status !== "ready" || this.sending}
+              title=${a.hint ?? a.label}
+              @click=${() => void this.runQuickAction(a)}
+            >
+              ${a.label}
+            </button>
+          `,
+        )}
+      </div>
       <footer>
+        <button
+          class="mic ${this.isListening ? "listening" : ""}"
+          ?disabled=${this.status.status !== "ready"}
+          title=${this.isListening ? "stop dictation" : "voice dictation"}
+          @click=${() => this.toggleVoiceInput()}
+        >
+          ${this.isListening ? "stop" : "mic"}
+        </button>
         <textarea
           .value=${this.draft}
           @input=${(e: InputEvent) => {

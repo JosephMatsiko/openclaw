@@ -348,6 +348,31 @@ export class PhoneGateway {
         }
         return;
       }
+      // Auto-recover from pair-required -> approved without manual reload.
+      // When the user approves the device via the Control UI (or the CLI),
+      // the gateway emits `device.pair.resolved` with decision="approved".
+      // Catch it and re-connect immediately.
+      if (event.event === "device.pair.resolved") {
+        const payload = event.payload as { decision?: string; requestId?: string } | null;
+        const decision = payload?.decision;
+        if (
+          decision === "approved" &&
+          (this.status.status === "pair-required" || this.status.status === "closed")
+        ) {
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          // Close the current ws (server will drop it anyway post-approval),
+          // then reconnect fresh so the signed connect frame carries the new
+          // pair state.
+          this.ws?.close();
+          this.ws = null;
+          this.setStatus({ status: "connecting", message: "pair approved - reconnecting" });
+          this.reconnectTimer = setTimeout(() => this.connect(), 400);
+        }
+        // fall through to event handlers so UI can reflect the resolution
+      }
       for (const handler of this.eventHandlers) {
         try {
           handler(event);
@@ -382,13 +407,23 @@ export class PhoneGateway {
       pending.reject(new Error(`gateway disconnected: ${ev.reason || ev.code}`));
     }
     this.pending.clear();
-    if (this.status.status !== "pair-required" && this.status.status !== "auth-error") {
-      this.setStatus({ status: "closed", message: ev.reason || `code ${ev.code}` });
-      // Retry once after a second — covers gateway restarts (which happen
-      // during config edits) without aggressive busy-looping on real auth
-      // failures.
-      this.reconnectTimer = setTimeout(() => this.connect(), 1500);
+    if (this.status.status === "auth-error") {
+      // Hard auth failure — don't busy-loop. User must fix token.
+      return;
     }
+    if (this.status.status === "pair-required") {
+      // Server commonly drops the ws after device.pair.resolved without
+      // giving us a chance to react. Poll back in a few seconds so a
+      // CLI-side approval is auto-picked-up even if the resolved event
+      // never reached us (e.g. event fired before our listener attached,
+      // or the subscription ws got closed).
+      this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+      return;
+    }
+    this.setStatus({ status: "closed", message: ev.reason || `code ${ev.code}` });
+    // Retry after a second on normal closes — covers gateway restarts
+    // during config edits without aggressive busy-looping.
+    this.reconnectTimer = setTimeout(() => this.connect(), 1500);
   }
 
   private setStatus(next: GatewayStatusDetail): void {
