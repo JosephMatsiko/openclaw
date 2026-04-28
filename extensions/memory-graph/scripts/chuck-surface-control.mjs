@@ -68,10 +68,22 @@ const SURFACE_APPS = new Set([
   "NotebookLM", // pending PWA install (used by TTS path)
   "Sora", // pending PWA install (OpenAI video gen)
   // Pending installs:
-  "Claude", // Claude.ai PWA — collides with native Claude.app at /Applications/Claude.app; anchor logic must distinguish via path or bundle id (TODO)
+  "Claude", // Claude.ai PWA display name; native Claude.app is distinguished by bundle id below.
   // Perplexity: NOT in this list. Native Perplexity.app and Comet cover the
   // shared Max account profile; Perplexity web may be Joseph's personal
   // account and should be tagged separately in receipts.
+]);
+
+const WORKSTATION_SAFE_BUNDLE_IDS = new Set([
+  // Native Claude desktop is both a human workspace and a Chuck surface.
+  // Do not discard it from workspace anchoring just because its display name
+  // collides with the Claude.ai PWA.
+  "com.anthropic.claudefordesktop",
+]);
+
+const SURFACE_BUNDLE_IDS = new Set([
+  "com.google.Chrome.app.fmpnliohjhemenmnlpbfagaolkdacoja", // Claude.ai PWA
+  "com.google.Chrome.app.lhcjejhnpnocjjnoledocdlkjkgkplpj", // Claude Design PWA
 ]);
 
 function usage() {
@@ -108,7 +120,23 @@ async function osa(script, opts = {}) {
   return res.stdout.trim();
 }
 
-async function activateApp(app) {
+async function activateApp(app, { bundleId = null } = {}) {
+  if (bundleId) {
+    await execFileP("open", ["-b", bundleId], {
+      encoding: "utf8",
+      timeout: 12_000,
+      killSignal: "SIGTERM",
+    }).catch(async () => {
+      await osa(`tell application id ${JSON.stringify(bundleId)} to reopen`).catch(() => {});
+    });
+    await osa(`tell application id ${JSON.stringify(bundleId)} to activate`).catch(async () => {
+      if (app) {
+        await osa(`tell application ${JSON.stringify(app)} to activate`).catch(() => {});
+      }
+    });
+    await sleep(350);
+    return;
+  }
   if (!app) {
     return;
   }
@@ -129,19 +157,10 @@ async function frontmostApp() {
   );
 }
 
-async function frontWindowTitle(app) {
-  if (!app) {
-    return null;
-  }
-  return osa(`
-    tell application "System Events"
-      if not (exists process ${JSON.stringify(app)}) then return ""
-      tell process ${JSON.stringify(app)}
-        if (count of windows) = 0 then return ""
-        return name of front window
-      end tell
-    end tell
-  `).catch(() => null);
+async function frontmostBundleId() {
+  return osa(
+    'tell application "System Events" to bundle identifier of first application process whose frontmost is true',
+  ).catch(() => null);
 }
 
 async function captureChromeFrontTab() {
@@ -163,18 +182,43 @@ async function captureChromeFrontTab() {
   }
 }
 
+async function frontmostWindowTitle() {
+  return osa(`
+    tell application "System Events"
+      set p to first application process whose frontmost is true
+      tell p
+        if (count of windows) = 0 then return ""
+        return name of front window
+      end tell
+    end tell
+  `).catch(() => null);
+}
+
 async function captureWorkstation() {
   const app = await frontmostApp().catch(() => null);
+  const bundleId = await frontmostBundleId();
   const state = {
     capturedAt: new Date().toISOString(),
     app,
-    frontWindowTitle: await frontWindowTitle(app),
+    bundleId,
+    frontWindowTitle: await frontmostWindowTitle(),
     chrome: null,
   };
   if (app === "Google Chrome") {
     state.chrome = await captureChromeFrontTab();
   }
   return state;
+}
+
+function isSurfaceWorkstation(workstation) {
+  const bundleId = workstation?.bundleId;
+  if (bundleId && WORKSTATION_SAFE_BUNDLE_IDS.has(bundleId)) {
+    return false;
+  }
+  if (bundleId && SURFACE_BUNDLE_IDS.has(bundleId)) {
+    return true;
+  }
+  return SURFACE_APPS.has(workstation?.app);
 }
 
 function ensureSurfaceStateDir() {
@@ -257,7 +301,7 @@ function readWorkspaceAnchor() {
   if (!Number.isFinite(ageMs) || ageMs > ANCHOR_FRESH_MS) {
     return null;
   }
-  if (SURFACE_APPS.has(anchor.workstation?.app)) {
+  if (isSurfaceWorkstation(anchor.workstation)) {
     return null;
   }
   return anchor;
@@ -276,7 +320,7 @@ async function writeWorkspaceAnchor() {
   const workstation = await captureWorkstation();
   // Skip if frontmost is a known PWA-shell driver (these are NEVER Joseph's
   // workspace, even outside a lease — they only run when Chuck drives them).
-  if (SURFACE_APPS.has(workstation.app)) {
+  if (isSurfaceWorkstation(workstation)) {
     return { ok: false, reason: "frontmost-is-surface", workstation };
   }
   const anchor = { ...workstation, capturedAt: workstation.capturedAt, workstation };
@@ -368,10 +412,15 @@ async function restoreChromeTab(chrome) {
 async function verifyWorkstation(state = {}) {
   const target = state?.workstation ?? state ?? {};
   const targetApp = process.env.CHUCK_WORKSTATION_RETURN_APP || target?.app;
+  const targetBundleId = process.env.CHUCK_WORKSTATION_RETURN_BUNDLE_ID || target?.bundleId;
   if (!targetApp) {
     return { ok: false, reason: "no target app" };
   }
   const frontmost = await frontmostApp().catch(() => null);
+  const bundleId = await frontmostBundleId();
+  if (targetBundleId && bundleId !== targetBundleId) {
+    return { ok: false, reason: "frontmost bundle mismatch", frontmost, bundleId, targetBundleId };
+  }
   if (frontmost !== targetApp) {
     return { ok: false, reason: "frontmost mismatch", frontmost, targetApp };
   }
@@ -403,6 +452,7 @@ async function restoreWorkstation(state = {}) {
   const anchor = process.env.CHUCK_IGNORE_WORKSPACE_ANCHOR === "1" ? null : readWorkspaceAnchor();
   const target = anchor?.workstation ?? lease?.workstation ?? state ?? {};
   const targetApp = process.env.CHUCK_WORKSTATION_RETURN_APP || target?.app;
+  const targetBundleId = process.env.CHUCK_WORKSTATION_RETURN_BUNDLE_ID || target?.bundleId;
   if (!targetApp) {
     return { ok: false, reason: "no target app captured" };
   }
@@ -420,7 +470,7 @@ async function restoreWorkstation(state = {}) {
           verification,
         };
       } else {
-        await activateApp(targetApp);
+        await activateApp(targetApp, { bundleId: targetBundleId });
         await sleep(250);
         const verification = await verifyWorkstation(target);
         result = { ok: verification.ok, app: targetApp, restored: "app", attempt, verification };
@@ -618,7 +668,10 @@ async function main() {
   }
 
   if (cmd === "frontmost") {
-    printResult({ ok: true, frontmost: await frontmostApp() }, opts.json);
+    printResult(
+      { ok: true, frontmost: await frontmostApp(), bundleId: await frontmostBundleId() },
+      opts.json,
+    );
   } else if (cmd === "capture-workstation") {
     printResult({ ok: true, workstation: await captureWorkstation() }, opts.json);
   } else if (cmd === "current-workspace") {
@@ -702,6 +755,8 @@ export {
   writeWorkspaceAnchor,
   desktopBounds,
   frontmostApp,
+  frontmostBundleId,
+  frontmostWindowTitle,
   restoreWorkstation,
   runOcr,
   snapshot,
