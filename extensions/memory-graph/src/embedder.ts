@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -9,9 +11,53 @@ import { join } from "node:path";
 // all-MiniLM-L6-v2 is the canonical small-and-decent sentence model:
 // 384-dim, fast on Apple Silicon, ~90MB quantized. Model id is recorded on
 // each row so a future swap invalidates stale vectors cleanly.
+//
+// SHA pinning (added 2026-04-28 per Opus 4.7's "embedding coupling = one-way
+// door" warning from the LocalModelRole panel): the ONNX bytes are
+// fingerprinted at first load. Subsequent loads verify the file SHA against
+// EMBEDDING_MODEL_HASH; mismatch refuses to load (env override:
+// APEX_ALLOW_EMBED_DRIFT=1 for explicit migration). Catches CDN swaps,
+// silent vendor weight changes, and ensures the same vectors retrieved
+// today match the vectors stored yesterday.
 
 export const EMBEDDING_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 export const EMBEDDING_DIM = 384;
+// SHA256 of the cached ONNX bytes pinned at 2026-04-28.
+// Source: ~/.cache/openclaw-embeddings/Xenova/all-MiniLM-L6-v2/onnx/model_quantized.onnx
+// 22,972,370 bytes; modified 2026-04-21T20:57.
+// To rotate: bump this constant, run with APEX_ALLOW_EMBED_DRIFT=1 once,
+// then re-embed any rows that need to be re-encoded against new bytes.
+export const EMBEDDING_MODEL_HASH =
+  "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1";
+
+export function verifyEmbeddingModelHash(): {
+  ok: boolean;
+  actual: string | null;
+  reason?: string;
+} {
+  const onnxPath = join(
+    homedir(),
+    ".cache",
+    "openclaw-embeddings",
+    "Xenova",
+    "all-MiniLM-L6-v2",
+    "onnx",
+    "model_quantized.onnx",
+  );
+  if (!existsSync(onnxPath)) {
+    return { ok: false, actual: null, reason: "ONNX bytes not yet cached" };
+  }
+  const bytes = readFileSync(onnxPath);
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual === EMBEDDING_MODEL_HASH) {
+    return { ok: true, actual };
+  }
+  return {
+    ok: false,
+    actual,
+    reason: `SHA mismatch: pinned=${EMBEDDING_MODEL_HASH}, actual=${actual}`,
+  };
+}
 
 type TransformersPipeline = (
   input: string,
@@ -41,6 +87,24 @@ async function createEmbedder(): Promise<EmbedderState> {
   const pipeline = await transformers.pipeline("feature-extraction", EMBEDDING_MODEL_ID, {
     quantized: true,
   });
+
+  // Verify SHA pin AFTER pipeline load — the pipeline call is what fetches
+  // the ONNX bytes if they aren't cached yet, so verification on a cold
+  // start needs to wait until the cache exists.
+  const verify = verifyEmbeddingModelHash();
+  if (!verify.ok) {
+    if (process.env.APEX_ALLOW_EMBED_DRIFT === "1") {
+      process.stderr.write(
+        `[embedder] SHA drift accepted via APEX_ALLOW_EMBED_DRIFT=1: ${verify.reason}\n` +
+          `[embedder] new hash for pinning: ${verify.actual}\n`,
+      );
+    } else {
+      throw new Error(
+        `Embedding model SHA mismatch — refused to load (set APEX_ALLOW_EMBED_DRIFT=1 to override). ${verify.reason}`,
+      );
+    }
+  }
+
   return { pipeline };
 }
 
