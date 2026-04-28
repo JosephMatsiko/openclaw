@@ -314,11 +314,17 @@ async function writeToCommandStdin(command, args, input, { timeoutMs = 5000 } = 
   });
 }
 
-async function screenshot(path, { timeoutMs = 10_000 } = {}) {
+async function screenshot(path, { timeoutMs = 10_000, region } = {}) {
   let lastError;
+  const args = ["-x"];
+  if (Array.isArray(region) && region.length === 4) {
+    const cleanRegion = region.map((n) => Math.max(1, Math.round(Number(n) || 1)));
+    args.push("-R", cleanRegion.join(","));
+  }
+  args.push(path);
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await execFileP("/usr/sbin/screencapture", ["-x", path], {
+      await execFileP("/usr/sbin/screencapture", args, {
         timeout: timeoutMs,
         killSignal: "SIGTERM",
       });
@@ -375,7 +381,86 @@ async function ensureConversationWindow() {
   }
 }
 
+// Detect ChatGPT.app's standard chat window — and whether it's in
+// fullscreen Space (Joseph's setup). If fullscreen, the driver can't
+// resize to WINDOW_SIZE, so we leave geometry alone and let
+// dynamicComposerCenter / replyCrop adapt at runtime.
+async function detectMainWindow() {
+  const script = `
+    tell application "System Events" to tell process "${APP_NAME}"
+      set targetWin to missing value
+      set winCount to count of windows
+      repeat with i from 1 to winCount
+        try
+          if (role description of window i) is "standard window" then
+            set targetWin to window i
+            exit repeat
+          end if
+        end try
+      end repeat
+      if targetWin is missing value and winCount > 0 then
+        set targetWin to window 1
+      end if
+      if targetWin is missing value then return ""
+      set p to position of targetWin
+      set s to size of targetWin
+      set isFs to "false"
+      try
+        set isFs to (value of attribute "AXFullScreen" of targetWin) as string
+      end try
+      return (item 1 of p as string) & "," & (item 2 of p as string) & "," & (item 1 of s as string) & "," & (item 2 of s as string) & "," & isFs
+    end tell
+  `;
+  const out = await osa(script).catch(() => "");
+  if (!out) {
+    return null;
+  }
+  const [px, py, sx, sy, isFs] = out.split(",");
+  return {
+    pos: [Number(px), Number(py)],
+    size: [Number(sx), Number(sy)],
+    fullscreen: isFs === "true",
+  };
+}
+
+let _runtimeWindow = null;
+
+function runtimeComposerCenter() {
+  const w = _runtimeWindow;
+  if (!w || !w.size?.[0]) {
+    return COORDS.composerCenter;
+  }
+  const [px, py] = w.pos;
+  const [sx, sy] = w.size;
+  return [px + Math.round(sx / 2), py + sy - COMPOSER_Y_OFFSET_FROM_BOTTOM];
+}
+
+function runtimeReplyCrop() {
+  const w = _runtimeWindow;
+  if (!w || !w.size?.[0]) {
+    return COORDS.replyCrop;
+  }
+  const [px, py] = w.pos;
+  const [sx, sy] = w.size;
+  // Inset 20px from sides, 100px from top (header), 200px from bottom
+  // (composer + tools row) to capture chat history.
+  return [px + 20, py + 100, sx - 40, sy - 300];
+}
+
 async function standardizeWindow() {
+  const w = await detectMainWindow();
+  if (w) {
+    _runtimeWindow = w;
+    if (w.fullscreen) {
+      // Can't resize a fullscreen window; leave it. Composer + crop
+      // will recompute from the runtime window dimensions. Just raise.
+      await osa(
+        `tell application "System Events" to tell process "${APP_NAME}" to perform action "AXRaise" of window 1`,
+      ).catch(() => {});
+      await sleep(200);
+      return;
+    }
+  }
   const [px, py] = WINDOW_POS;
   const [sx, sy] = WINDOW_SIZE;
   const script = `
@@ -612,6 +697,14 @@ export async function askChatGPTMac({
         `[chatgpt-mac] composer anchor score=${composerAnchor.score} point=${composerAnchor.point.join(",")} role=${composerAnchor.role.slice(0, 80)}\n`,
       );
       await clickAt(composerAnchor.point);
+    } else if (_runtimeWindow?.fullscreen) {
+      // Fullscreen ChatGPT.app: the AX tree often hides the composer
+      // anchor. Click the runtime-computed bottom-center as a focus
+      // assist. Computed from actual window geometry, not the
+      // 1100x800 calibration.
+      const rcc = runtimeComposerCenter();
+      process.stderr.write(`[chatgpt-mac] fullscreen: composer click @ ${rcc.join(",")}\n`);
+      await clickAt(rcc);
     }
     const fullPrompt =
       PROMPT_PREFIX +
@@ -619,6 +712,11 @@ export async function askChatGPTMac({
       String(prompt);
     await pbcopy(fullPrompt);
     await sleep(150);
+    // Ensure ChatGPT.app is frontmost right before the paste so the
+    // keystroke routes to it. Without this, sibling Mac-app activity
+    // can steal frontmost between standardizeWindow and the keystroke.
+    await osa(`tell application id "${APP_BUNDLE_ID}" to activate`).catch(() => {});
+    await sleep(200);
     await osa('tell application "System Events" to keystroke "v" using command down');
     await sleep(450);
     await cliclick("kp:return");
@@ -632,7 +730,7 @@ export async function askChatGPTMac({
       const shot = join(tmp, `chatgpt-mac-${Date.now()}.png`);
       let state;
       try {
-        await screenshot(shot);
+        await screenshot(shot, { region: runtimeReplyCrop() });
         state = await readReplyState(shot);
       } finally {
         try {

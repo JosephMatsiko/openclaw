@@ -208,13 +208,17 @@ function isStaleHandleError(result) {
   return STALE_HANDLE_RX.test(String(result.error ?? ""));
 }
 
-// URL-verifying eval. The "tab N of window M" reference can silently
-// address the WRONG tab after parallel voices' findOrOpenTab calls
-// reorder windows. The lock + stale-error retry catches the loud case
-// (-1719); this catches the silent case where eval succeeds but reads
-// from a sibling voice's tab. Wraps user code to also return
-// location.href, then verifies the URL still matches the tab's
-// urlMatch substring.
+// URL-verifying eval. Window-id refs prevent SILENT wrong-tab reads
+// under parallel findOrOpenTab races (V5/V6 lib fix). URL-verify wraps
+// the user code to return location.href and refreshes if mismatch —
+// defense in depth.
+//
+// V8 attempted a `Object.defineProperty(document, 'visibilityState'...)`
+// shim to keep chat-app streaming alive when their tab loses focus.
+// REGRESSION: V8 dropped from 2/4 to 1/4 web voices passing. Hypothesis:
+// the shim interfered with the page's own state machinery. Reverted.
+// gemini-web and grok-web stay panel-flaky for now — solo (`--only X`)
+// works reliably for those surfaces.
 async function evalInTabWithRetry(tab, code) {
   const expectedUrlMatch = tab?.urlMatch ?? "";
   const wrappedCode = `var __url = location.href; var __r = (function(){ ${code} })(); return { __r: __r, __url: __url };`;
@@ -226,8 +230,6 @@ async function evalInTabWithRetry(tab, code) {
         r = await applescript.evalInTab(tab.handle.target, wrappedCode);
         continue;
       }
-      // Silent wrong-tab: eval succeeded but URL mismatches what we
-      // expected. Means sibling voices reordered our tab away.
       if (r.ok && expectedUrlMatch) {
         const seenUrl = String(r.value?.__url ?? "");
         if (!seenUrl.includes(expectedUrlMatch)) {
@@ -238,7 +240,6 @@ async function evalInTabWithRetry(tab, code) {
       }
       break;
     }
-    // Unwrap our wrapper to return the user's original shape.
     if (r.ok && r.value && Object.prototype.hasOwnProperty.call(r.value, "__r")) {
       return { ok: true, value: r.value.__r };
     }

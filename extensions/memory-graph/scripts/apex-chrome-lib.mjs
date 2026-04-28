@@ -73,23 +73,49 @@ export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
   if (!urlMatch) {
     throw new Error("findOrOpenTab: urlMatch required");
   }
+  // Two-pass search: prefer SINGLE-TAB windows (PWA-style standalone)
+  // before falling back to tabs in multi-tab windows. PWA windows have
+  // their own document context, so they don't contend with sibling
+  // voices for the "active tab" slot. When in fullscreen Space, PWA
+  // tabs keep document.visibilityState='visible' even when not the
+  // foreground window — fixes the panel-flaky behavior where
+  // gemini/grok/aistudio chat apps pause streaming on visibility loss.
   const findScript = `
 set out to ""
 tell application "Google Chrome"
+  -- Pass 1: single-tab windows (PWA preference)
   repeat with wIdx from 1 to count windows
     set tabs_ to tabs of window wIdx
-    repeat with tIdx from 1 to count tabs_
-      set t to item tIdx of tabs_
+    if (count tabs_) = 1 then
+      set t to item 1 of tabs_
       try
         if URL of t contains "${escAS(urlMatch)}" then
           set wId to id of window wIdx
-          set out to (wIdx as string) & "," & (tIdx as string) & "," & (wId as string)
+          set out to (wIdx as string) & ",1," & (wId as string)
           exit repeat
         end if
       end try
-    end repeat
-    if out is not "" then exit repeat
+    end if
   end repeat
+  if out is "" then
+    -- Pass 2: tabs in multi-tab windows
+    repeat with wIdx from 1 to count windows
+      set tabs_ to tabs of window wIdx
+      if (count tabs_) > 1 then
+        repeat with tIdx from 1 to count tabs_
+          set t to item tIdx of tabs_
+          try
+            if URL of t contains "${escAS(urlMatch)}" then
+              set wId to id of window wIdx
+              set out to (wIdx as string) & "," & (tIdx as string) & "," & (wId as string)
+              exit repeat
+            end if
+          end try
+        end repeat
+        if out is not "" then exit repeat
+      end if
+    end repeat
+  end if
 end tell
 return out
 `;
