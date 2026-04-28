@@ -139,7 +139,7 @@ async function readReply(tab, prompt = "") {
   const r = await evalInTab(
     tab,
     `
-    var promptText = ${JSON.stringify(String(prompt))};
+    var promptText = ${JSON.stringify(prompt)};
     function clean(raw) {
       var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
       var out = [];

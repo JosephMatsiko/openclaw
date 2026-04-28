@@ -80,7 +80,7 @@ function parseUiAnchor(raw) {
   }
   const score = Number.parseInt(parts[0] ?? "", 10);
   const purpose = parts[1] ?? "";
-  const [xRaw, yRaw] = String(parts[2] ?? "").split(",");
+  const [xRaw, yRaw] = (parts[2] ?? "").split(",");
   const x = Number.parseInt(xRaw ?? "", 10);
   const y = Number.parseInt(yRaw ?? "", 10);
   if (!Number.isFinite(score) || !Number.isFinite(x) || !Number.isFinite(y)) {
@@ -478,7 +478,7 @@ async function calibrateChatGPTMac() {
     screenCapture,
     anchors: { composer, newChat, thinkingToggle },
     fallbackCoords: COORDS,
-    loadBearing: Boolean((composer || screenCapture.ok) && screenCapture.ok),
+    loadBearing: Boolean(composer || screenCapture.ok) && screenCapture.ok,
     caveats: [
       composer
         ? "Composer anchor found through macOS Accessibility."

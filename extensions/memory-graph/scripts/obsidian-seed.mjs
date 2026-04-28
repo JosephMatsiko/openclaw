@@ -406,7 +406,7 @@ function plan(path, content) {
     console.log(`  plan  ${path.replace(VAULT, "")} (${content.length} chars)`);
     return;
   }
-  const dir = path.substring(0, path.lastIndexOf("/"));
+  const dir = path.slice(0, path.lastIndexOf("/"));
   if (dir && !existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

@@ -182,7 +182,7 @@ async function classifyTextByLLM(
     }
     // Exponential backoff with jitter. 429 at concurrency=1 + ~1.5s wait
     // keeps us under 60 RPM which is inside the Flash free-tier envelope.
-    const backoffMs = 1500 * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+    const backoffMs = 1500 * 2 ** attempt + Math.floor(Math.random() * 500);
     await sleep(backoffMs);
   }
   return { tier: "complex", signals: ["llm-fallback-failed", lastReason] };

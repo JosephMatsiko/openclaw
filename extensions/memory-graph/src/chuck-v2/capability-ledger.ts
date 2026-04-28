@@ -349,13 +349,15 @@ export function readinessBoardSummary(
       const bottlenecks = familyEntries
         .filter((entry) => entry.readiness !== "load-bearing")
         .map((entry) => `${entry.surface}: ${entry.readiness}`);
-      return {
-        family: row.family,
-        status: (row.loadBearing === 0
+      const status: "blocked" | "full" | "partial" =
+        row.loadBearing === 0
           ? "blocked"
           : row.provisional + row.degraded + row.blocked === 0
             ? "full"
-            : "partial") as "full" | "partial" | "blocked",
+            : "partial";
+      return {
+        family: row.family,
+        status,
         loadBearing: row.loadBearing,
         provisional: row.provisional,
         degraded: row.degraded,

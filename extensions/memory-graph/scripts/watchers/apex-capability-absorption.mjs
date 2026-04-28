@@ -120,7 +120,7 @@ async function listChromeTools() {
         resolve({ ok: false, tools: [], error: err.slice(0, 200) });
         return;
       }
-      if (/NO_CHROME_MCP/.test(out)) {
+      if (out.includes("NO_CHROME_MCP")) {
         resolve({ ok: true, tools: [], error: "no-chrome-mcp-in-session" });
         return;
       }

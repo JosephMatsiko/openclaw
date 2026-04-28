@@ -182,8 +182,8 @@ async function readReply(tab, { prompt = "", minAssistantCount = 0 } = {}) {
   const r = await evalInTab(
     tab,
     `
-    var promptText = ${JSON.stringify(String(prompt))};
-    var minCount = ${Number(minAssistantCount)};
+    var promptText = ${JSON.stringify(prompt)};
+    var minCount = ${minAssistantCount};
     function clean(raw) {
       var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
       var out = [];

@@ -76,7 +76,7 @@ export function buildAllowListIptablesScript(patterns: readonly string[]): strin
     if (port === "*") {
       lines.push(`iptables -A OUTPUT -d ${host} -j ACCEPT`);
     } else {
-      const portNum = parseInt(port, 10);
+      const portNum = Number.parseInt(port, 10);
       if (Number.isNaN(portNum)) {
         continue;
       }

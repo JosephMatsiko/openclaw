@@ -944,7 +944,7 @@ function normalizeCandidateFamily(value: string): ChuckFamily {
   if (/(google|gemini|vertex)/.test(normalized)) {
     return "google";
   }
-  if (/perplexity/.test(normalized)) {
+  if (normalized.includes("perplexity")) {
     return "perplexity";
   }
   if (/(xai|grok)/.test(normalized)) {
