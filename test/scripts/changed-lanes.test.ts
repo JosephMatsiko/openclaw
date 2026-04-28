@@ -172,6 +172,30 @@ describe("scripts/changed-lanes", () => {
     expect(plan.runFullTests).toBe(false);
   });
 
+  it("routes phone UI changes to focused phone checks instead of all lanes", () => {
+    const result = detectChangedLanes(["ui-phone/src/app.ts", "ui-phone/public/sw.js"]);
+    const plan = createChangedCheckPlan(result);
+
+    expect(result.lanes).toMatchObject({
+      phoneUi: true,
+      all: false,
+    });
+    expect(plan.commands).toContainEqual({
+      name: "typecheck ui-phone",
+      args: ["exec", "tsc", "-p", "ui-phone/tsconfig.json"],
+    });
+    expect(plan.commands).toContainEqual({
+      name: "lint ui-phone",
+      args: ["exec", "oxlint", "ui-phone/src", "ui-phone/public"],
+    });
+    expect(plan.commands).toContainEqual({
+      name: "build ui-phone",
+      args: ["--dir", "ui-phone", "build"],
+    });
+    expect(plan.runFullTests).toBe(false);
+    expect(plan.runChangedTestsBroad).toBe(false);
+  });
+
   it("keeps shared Vitest wiring changes on the broad changed test path", () => {
     const result = detectChangedLanes(["test/vitest/vitest.shared.config.ts"]);
     const plan = createChangedCheckPlan(result);
@@ -220,6 +244,7 @@ describe("scripts/changed-lanes", () => {
       extensions: false,
       extensionTests: false,
       apps: false,
+      phoneUi: false,
       docs: false,
       tooling: false,
       all: false,

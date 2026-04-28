@@ -73,6 +73,11 @@ export function createChangedCheckPlan(result) {
   if (lanes.apps) {
     add("lint apps", ["lint:apps"]);
   }
+  if (lanes.phoneUi) {
+    add("typecheck ui-phone", ["exec", "tsc", "-p", "ui-phone/tsconfig.json"]);
+    add("lint ui-phone", ["exec", "oxlint", "ui-phone/src", "ui-phone/public"]);
+    add("build ui-phone", ["--dir", "ui-phone", "build"]);
+  }
 
   if (lanes.core || lanes.extensions) {
     add("runtime import cycles", ["check:import-cycles"]);

@@ -4,6 +4,7 @@ import { booleanFlag, parseFlagArgs, stringFlag } from "./lib/arg-utils.mjs";
 
 const DOCS_PATH_RE = /^(?:docs\/|README\.md$|AGENTS\.md$|.*\.mdx?$)/u;
 const APP_PATH_RE = /^(?:apps\/|Swabble\/|appcast\.xml$)/u;
+const PHONE_UI_PATH_RE = /^ui-phone(?:\/|$)/u;
 const EXTENSION_PATH_RE = /^extensions\/[^/]+(?:\/|$)/u;
 const CORE_PATH_RE = /^(?:src\/|ui\/|packages\/)/u;
 const TOOLING_PATH_RE =
@@ -15,7 +16,7 @@ const TEST_PATH_RE =
 const PUBLIC_EXTENSION_CONTRACT_RE =
   /^(?:src\/plugin-sdk\/|src\/plugins\/contracts\/|src\/channels\/plugins\/|scripts\/lib\/plugin-sdk-entrypoints\.json$|scripts\/sync-plugin-sdk-exports\.mjs$|scripts\/generate-plugin-sdk-api-baseline\.ts$)/u;
 
-/** @typedef {"core" | "coreTests" | "extensions" | "extensionTests" | "apps" | "docs" | "tooling" | "all"} ChangedLane */
+/** @typedef {"core" | "coreTests" | "extensions" | "extensionTests" | "apps" | "phoneUi" | "docs" | "tooling" | "all"} ChangedLane */
 
 /**
  * @typedef {{
@@ -41,6 +42,7 @@ export function createEmptyChangedLanes() {
     extensions: false,
     extensionTests: false,
     apps: false,
+    phoneUi: false,
     docs: false,
     tooling: false,
     all: false,
@@ -111,6 +113,12 @@ export function detectChangedLanes(changedPaths) {
         lanes.coreTests = true;
         reasons.push(`${changedPath}: core production`);
       }
+      continue;
+    }
+
+    if (PHONE_UI_PATH_RE.test(changedPath)) {
+      lanes.phoneUi = true;
+      reasons.push(`${changedPath}: phone UI surface`);
       continue;
     }
 
