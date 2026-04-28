@@ -19,6 +19,7 @@ import type {
   MachineResourceSnapshot,
   StakeClass,
   TaskClass,
+  WorkerHealthSnapshot,
 } from "./types.js";
 
 export type CapabilityAuthorityMode =
@@ -116,6 +117,19 @@ export type CapabilityLedgerSummary = {
   blockedSurfaces: number;
   independentLoadBearingFamilies: ChuckFamily[];
   independentLoadBearingFamilyCount: number;
+  fullCapacityFamilies: ChuckFamily[];
+  partialCapacityFamilies: ChuckFamily[];
+  blockedCapacityFamilies: ChuckFamily[];
+  capacityScore: number;
+  familyCapacity: Array<{
+    family: string;
+    status: "full" | "partial" | "blocked";
+    loadBearing: number;
+    provisional: number;
+    degraded: number;
+    blocked: number;
+    bottlenecks: string[];
+  }>;
   readinessByFamily: Array<{
     family: string;
     loadBearing: number;
@@ -215,6 +229,7 @@ export function ledgerEntryForSurface(
     ...(resources?.memoryPressure === "critical"
       ? ["critical memory pressure; only trivial work should run"]
       : []),
+    ...(doctorRow?.status === "blocked" ? [doctorRow.healthReason] : []),
   ].filter(Boolean);
   const failureMode = activeLateRecovery
     ? activeLateRecovery.label
@@ -328,6 +343,48 @@ export function readinessBoardSummary(
   const independentLoadBearingFamilies = ledger.entries
     .filter((entry) => entry.countsAsIndependentFamily && isChuckFamily(entry.family))
     .map((entry) => entry.family as ChuckFamily);
+  const familyCapacity = [...byFamily.values()]
+    .map((row) => {
+      const familyEntries = ledger.entries.filter((entry) => entry.family === row.family);
+      const bottlenecks = familyEntries
+        .filter((entry) => entry.readiness !== "load-bearing")
+        .map((entry) => `${entry.surface}: ${entry.readiness}`);
+      return {
+        family: row.family,
+        status: (row.loadBearing === 0
+          ? "blocked"
+          : row.provisional + row.degraded + row.blocked === 0
+            ? "full"
+            : "partial") as "full" | "partial" | "blocked",
+        loadBearing: row.loadBearing,
+        provisional: row.provisional,
+        degraded: row.degraded,
+        blocked: row.blocked,
+        bottlenecks,
+      };
+    })
+    .toSorted((a, b) => a.family.localeCompare(b.family));
+  const chuckFamilyCapacity = familyCapacity.filter((row) => isChuckFamily(row.family));
+  const fullCapacityFamilies = chuckFamilyCapacity
+    .filter((row) => row.status === "full")
+    .map((row) => row.family as ChuckFamily);
+  const partialCapacityFamilies = chuckFamilyCapacity
+    .filter((row) => row.status === "partial")
+    .map((row) => row.family as ChuckFamily);
+  const blockedCapacityFamilies = chuckFamilyCapacity
+    .filter((row) => row.status === "blocked")
+    .map((row) => row.family as ChuckFamily);
+  const capacityScore =
+    chuckFamilyCapacity.length === 0
+      ? 0
+      : Math.round(
+          (chuckFamilyCapacity.reduce((sum, row) => {
+            const total = row.loadBearing + row.provisional + row.degraded + row.blocked;
+            return sum + (total === 0 ? 0 : row.loadBearing / total);
+          }, 0) /
+            chuckFamilyCapacity.length) *
+            100,
+        );
   return {
     totalSurfaces: ledger.entries.length,
     loadBearingSurfaces: ledger.entries.filter((entry) => entry.readiness === "load-bearing")
@@ -337,6 +394,11 @@ export function readinessBoardSummary(
     blockedSurfaces: ledger.entries.filter((entry) => entry.readiness === "blocked").length,
     independentLoadBearingFamilies,
     independentLoadBearingFamilyCount: independentLoadBearingFamilies.length,
+    fullCapacityFamilies,
+    partialCapacityFamilies,
+    blockedCapacityFamilies,
+    capacityScore,
+    familyCapacity,
     readinessByFamily: [...byFamily.values()].toSorted((a, b) => a.family.localeCompare(b.family)),
   };
 }
@@ -344,17 +406,24 @@ export function readinessBoardSummary(
 export function buildCapabilityLedgerForState({
   stateDir = CHUCK_V2_STATE_DIR,
   config = configWithSafeCliScoutSurfaces(),
+  doctor: providedDoctor,
+  executionProofs: providedExecutionProofs,
+  health,
   generatedAt = new Date().toISOString(),
   resources,
 }: {
   stateDir?: string;
   config?: ChuckConfig;
+  doctor?: ModelDoctorReport;
+  executionProofs?: Record<string, RunnerSurfaceProof>;
+  health?: WorkerHealthSnapshot;
   generatedAt?: string;
   resources?: MachineResourceSnapshot;
 } = {}): CapabilityLedger {
-  const executionProofs = loadRunnerSurfaceProofs({ stateDir });
+  const executionProofs = providedExecutionProofs ?? loadRunnerSurfaceProofs({ stateDir });
   const proofDetails = loadSurfaceProofDetails({ stateDir });
-  const doctor = runModelDoctor({ config, stateDir, executionProofs, generatedAt });
+  const doctor =
+    providedDoctor ?? runModelDoctor({ config, stateDir, executionProofs, health, generatedAt });
   return buildCapabilityLedger({
     config,
     doctor,
@@ -557,6 +626,9 @@ function readinessForSurface({
   if (doctorRow?.status === "blocked") {
     return "blocked";
   }
+  if (atlasEntry?.surface === "ollama/localhost" && doctorRow?.status !== "ready") {
+    return executionProof?.successes ? "provisional" : "blocked";
+  }
   if (lateRecovery) {
     return "degraded";
   }
@@ -728,6 +800,9 @@ function nextRepairActionForSurface({
 }): string {
   if (readiness === "load-bearing") {
     return "Keep drift probes current; route by task class and quota.";
+  }
+  if (readiness === "blocked" && doctorRow?.status === "blocked") {
+    return doctorRow.nextAction;
   }
   if (lateRecovery?.surface === "perplexity/mac-app") {
     return "Repair Perplexity direct answer extraction; OCR recovery is not load-bearing.";

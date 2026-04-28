@@ -3260,6 +3260,10 @@ describe("Chuck V2 model doctor", () => {
       executionStatus: "registered",
       countsAsLoadBearingFamily: true,
     });
+    expect(report.rows.find((row) => row.surface === "ollama/localhost")).toMatchObject({
+      status: "blocked",
+      countsAsLoadBearingFamily: false,
+    });
   });
 
   test("doctor graduates provisional surfaces only with repeatable live receipt proof", () => {
@@ -3558,6 +3562,50 @@ describe("Chuck V2 capability ledger and intent anchors", () => {
     expect(
       ledger.summary.independentLoadBearingFamilies.filter((family) => family === "openai"),
     ).toHaveLength(1);
+  });
+
+  test("ledger does not count stale local-model receipts when Ollama is unhealthy", () => {
+    const config = configWithSafeCliScoutSurfaces();
+    const executionProofs = {
+      "ollama/localhost": {
+        surface: "ollama/localhost",
+        family: "sovereign-local" as const,
+        successes: 2,
+        failures: 0,
+        latestStatus: "completed" as const,
+        lastSuccessAt: "2026-04-27T00:00:01.000Z",
+        repeatable: true,
+      },
+    };
+    const doctor = runModelDoctor({
+      config,
+      generatedAt: "2026-04-27T00:00:00.000Z",
+      executionProofs,
+      health: {
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        workers: {
+          ollama: { worker: "ollama", healthy: false, details: "unreachable" },
+        },
+      },
+    });
+    const ledger = buildCapabilityLedger({
+      config,
+      doctor,
+      executionProofs,
+      generatedAt: "2026-04-27T00:00:00.000Z",
+    });
+    const local = ledger.entries.find((entry) => entry.surface === "ollama/localhost");
+
+    expect(local).toMatchObject({
+      readiness: "blocked",
+      canCountForFamily: false,
+      countsAsIndependentFamily: false,
+      failureMode: "unreachable",
+      nextRepairAction: "Start Ollama and install/select the local sovereignty-floor model.",
+    });
+    expect(local?.caveats).toContain("unreachable");
+    expect(ledger.summary.independentLoadBearingFamilies).not.toContain("sovereign-local");
+    expect(ledger.summary.blockedCapacityFamilies).toContain("sovereign-local");
   });
 
   test("IntentAnchor signatures verify and fail after tampering", () => {

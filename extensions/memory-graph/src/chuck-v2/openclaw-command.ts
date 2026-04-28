@@ -567,12 +567,18 @@ export async function runDoctorFromOpenClawCommand({
     import("./capability-ledger.js"),
   ]);
   const config = configWithSafeCliScoutSurfaces();
+  const executionProofs = loadRunnerSurfaceProofs({ stateDir });
   const report = runModelDoctor({
     config,
     stateDir,
-    executionProofs: loadRunnerSurfaceProofs({ stateDir }),
+    executionProofs,
   });
-  const capabilityLedger = buildCapabilityLedgerForState({ stateDir, config });
+  const capabilityLedger = buildCapabilityLedgerForState({
+    stateDir,
+    config,
+    doctor: report,
+    executionProofs,
+  });
   return {
     ...modelDoctorSummary(report),
     capabilityLedgerSummary: capabilityLedger.summary,

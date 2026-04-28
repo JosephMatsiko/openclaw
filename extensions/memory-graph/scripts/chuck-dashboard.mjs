@@ -373,7 +373,7 @@ async function capabilityLedgerStatus({ maxAgeMs = 30_000 } = {}) {
   if (capabilityLedgerCache && now - capabilityLedgerCache.cachedAt < maxAgeMs) {
     return capabilityLedgerCache.value;
   }
-  const run = await runChuckCli(["--capability-ledger", "--json"], {
+  const run = await runChuckCli(["--capability-ledger", "--probe", "--json"], {
     timeoutMs: dashboardCommandTimeoutMs({ kind: "capability-ledger" }),
   });
   if (!run.ok || !run.parsed?.ledger) {
@@ -1197,7 +1197,7 @@ function dashboardCommandTimeoutMs({ kind, prompt = "", autoDeepen = true } = {}
     return 20_000;
   }
   if (kind === "capability-ledger") {
-    return 20_000;
+    return 180_000;
   }
   if (kind === "build-plan") {
     return 25 * 60_000;
@@ -1923,8 +1923,10 @@ const DASHBOARD_HTML = `<!doctype html>
 	      metric("configured voices", p.configuredVoices),
 	      metric("ready families", (p.readyFamilies || []).join(", ") || "none"),
 	      metric("execution ready", (p.executionReadyFamilies || []).join(", ") || "none"),
-	      metric("kernel-ready", (ledger.independentLoadBearingFamilies || []).join(", ") || "none"),
-	      metric("load-bearing surfaces", ledger.loadBearingSurfaces),
+      metric("kernel-ready", (ledger.independentLoadBearingFamilies || []).join(", ") || "none"),
+      metric("full-capacity", (ledger.fullCapacityFamilies || []).join(", ") || "none"),
+      metric("capacity score", ledger.capacityScore == null ? "—" : ledger.capacityScore + "%"),
+      metric("load-bearing surfaces", ledger.loadBearingSurfaces),
 	      metric("blocked", (p.blockedFamilies || []).join(", ") || "none"),
       metric("minimum fleet", p.canRunLoadBearingMinimumFleet ? "ready" : "not ready"),
       metric("high risk fleet", p.canRunLoadBearingHighRiskFleet ? "ready" : "not ready"),

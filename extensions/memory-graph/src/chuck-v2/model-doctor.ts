@@ -461,6 +461,22 @@ function doctorRowForEntry(
       countsAsLoadBearingFamily: false,
     };
   }
+  if (entry.surface === "ollama/localhost" && healthRow && !healthRow.healthy) {
+    return {
+      family: entry.family,
+      voice: entry.voice,
+      surface: entry.surface,
+      status: "blocked",
+      executionStatus: execution.status,
+      executionReason: execution.reason,
+      healthKey,
+      healthReason: healthRow.details ?? "local model health probe failed",
+      guide,
+      nextAction: guide.setupAction,
+      countsAsFamily: false,
+      countsAsLoadBearingFamily: false,
+    };
+  }
   if (
     proof?.repeatable &&
     (REGISTERED_RUNNER_SURFACES.has(entry.surface) ||

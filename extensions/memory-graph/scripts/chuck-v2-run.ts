@@ -123,7 +123,22 @@ async function main(): Promise<void> {
   }
 
   if (options.capabilityLedger) {
-    const ledger = chuckV2.buildCapabilityLedgerForState({ stateDir });
+    const config = configWithSafeCliScoutSurfaces();
+    const health = options.healthFile
+      ? await readWorkerHealthSnapshot(options.healthFile)
+      : options.probe
+        ? await runWorkerProbe(config)
+        : undefined;
+    const executionProofs = loadRunnerSurfaceProofs({ stateDir });
+    const doctor = runModelDoctor({ config, stateDir, executionProofs, health });
+    const ledger = chuckV2.buildCapabilityLedgerForState({
+      stateDir,
+      config,
+      doctor,
+      executionProofs,
+      health,
+      generatedAt: doctor.generatedAt,
+    });
     const text = chuckV2.formatCapabilityLedgerReport(ledger);
     if (options.json) {
       console.log(JSON.stringify({ ok: true, text, ledger, summary: ledger.summary }, null, 2));
@@ -166,6 +181,9 @@ async function main(): Promise<void> {
     const capabilityLedger = chuckV2.buildCapabilityLedgerForState({
       stateDir: doctorStateDir,
       config: runtimeConfig,
+      doctor: report,
+      executionProofs: loadRunnerSurfaceProofs({ stateDir: doctorStateDir }),
+      health,
       generatedAt: report.generatedAt,
     });
     const docketItems = docketItemsForModelDoctor(report);
