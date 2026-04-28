@@ -1161,7 +1161,7 @@ export function computeRunnerTimeoutBudget({
     profile.minMs,
     profile.coldStartMs + promptUnits * profile.msPerPromptKChar,
   );
-  const envOverride = envName ? Number(process.env[envName]) : NaN;
+  const envOverride = envName ? Number(process.env[envName]) : Number.NaN;
   const hasEnvOverride = Number.isFinite(envOverride) && envOverride > 0;
   const hardCeilingMs = hasEnvOverride ? envOverride : profile.hardCeilingMs;
   const timeoutMs = hasEnvOverride ? envOverride : Math.min(computed, hardCeilingMs);
