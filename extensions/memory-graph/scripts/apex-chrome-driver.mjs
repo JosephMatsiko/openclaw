@@ -208,12 +208,39 @@ function isStaleHandleError(result) {
   return STALE_HANDLE_RX.test(String(result.error ?? ""));
 }
 
+// URL-verifying eval. The "tab N of window M" reference can silently
+// address the WRONG tab after parallel voices' findOrOpenTab calls
+// reorder windows. The lock + stale-error retry catches the loud case
+// (-1719); this catches the silent case where eval succeeds but reads
+// from a sibling voice's tab. Wraps user code to also return
+// location.href, then verifies the URL still matches the tab's
+// urlMatch substring.
 async function evalInTabWithRetry(tab, code) {
+  const expectedUrlMatch = tab?.urlMatch ?? "";
+  const wrappedCode = `var __url = location.href; var __r = (function(){ ${code} })(); return { __r: __r, __url: __url };`;
   return await withChromeAppleScriptLock(async () => {
-    let r = await applescript.evalInTab(tab.handle.target, code);
-    for (let attempt = 0; attempt < MAX_REFRESH_RETRIES && isStaleHandleError(r); attempt++) {
-      await refreshAppleScriptTab(tab);
-      r = await applescript.evalInTab(tab.handle.target, code);
+    let r = await applescript.evalInTab(tab.handle.target, wrappedCode);
+    for (let attempt = 0; attempt < MAX_REFRESH_RETRIES; attempt++) {
+      if (isStaleHandleError(r)) {
+        await refreshAppleScriptTab(tab);
+        r = await applescript.evalInTab(tab.handle.target, wrappedCode);
+        continue;
+      }
+      // Silent wrong-tab: eval succeeded but URL mismatches what we
+      // expected. Means sibling voices reordered our tab away.
+      if (r.ok && expectedUrlMatch) {
+        const seenUrl = String(r.value?.__url ?? "");
+        if (!seenUrl.includes(expectedUrlMatch)) {
+          await refreshAppleScriptTab(tab);
+          r = await applescript.evalInTab(tab.handle.target, wrappedCode);
+          continue;
+        }
+      }
+      break;
+    }
+    // Unwrap our wrapper to return the user's original shape.
+    if (r.ok && r.value && Object.prototype.hasOwnProperty.call(r.value, "__r")) {
+      return { ok: true, value: r.value.__r };
     }
     return r;
   });
