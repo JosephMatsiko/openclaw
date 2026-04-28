@@ -7,8 +7,8 @@
 //
 // Exports: researchBeat, askGrokChat
 
+import { spawn } from "node:child_process";
 import {
-  dispatchKey,
   evalInTab,
   findOrOpenTab,
   pollUntilStable,
@@ -67,6 +67,122 @@ async function dismissCookieConsent(tab) {
   return r.value ?? { clicked: false };
 }
 
+function runCommandWithStdin(command, args, input, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`${command} exited ${code}: ${stderr.slice(0, 400)}`));
+        return;
+      }
+      resolve();
+    });
+    child.stdin.end(input);
+  });
+}
+
+function runCommand(command, args, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`${command} exited ${code}: ${stderr.slice(0, 400)}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+async function pbpaste() {
+  return await runCommand("pbpaste", [], { timeoutMs: 5000 });
+}
+
+async function pbcopy(text) {
+  await runCommandWithStdin("pbcopy", [], String(text), { timeoutMs: 5000 });
+}
+
+async function osascript(script, { timeoutMs = 5000 } = {}) {
+  await runCommand("/usr/bin/osascript", ["-e", script], { timeoutMs });
+}
+
+async function realKeyboardSubmit(tab, prompt) {
+  const savedClipboard = await pbpaste().catch(() => "");
+  try {
+    await evalInTab(
+      tab,
+      `
+      var c = document.querySelector('textarea[placeholder*="Ask Grok" i]')
+           || document.querySelector('textarea[placeholder*="message" i]')
+           || document.querySelector('textarea')
+           || document.querySelector('div[contenteditable="true"]');
+      if (c) {
+        c.focus();
+        if (c.select) c.select();
+      }
+      return { focused: !!c };
+    `,
+    );
+    await pbcopy(prompt);
+    await osascript('tell application "System Events" to keystroke "a" using {command down}');
+    await osascript('tell application "System Events" to keystroke "v" using {command down}');
+    await new Promise((res) => setTimeout(res, 700));
+    await osascript('tell application "System Events" to key code 36');
+  } finally {
+    await pbcopy(savedClipboard).catch(() => {});
+  }
+}
+
 async function submitPrompt(tab, prompt) {
   await dismissCookieConsent(tab);
   const insert = await evalInTab(
@@ -105,7 +221,6 @@ async function submitPrompt(tab, prompt) {
   const settleMs = Math.min(500 + Math.floor(prompt.length / 20), 5000);
   await new Promise((r) => setTimeout(r, settleMs));
   let clicked = false;
-  let lastErr = "unknown";
   for (let attempt = 0; attempt < 3 && !clicked; attempt++) {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -128,14 +243,9 @@ async function submitPrompt(tab, prompt) {
       clicked = true;
       break;
     }
-    lastErr = send.value?.error ?? send.error ?? "unknown";
   }
   if (!clicked) {
-    try {
-      await dispatchKey(tab, "Enter");
-    } catch (e) {
-      throw new Error(`grok send: ${lastErr}`, { cause: e });
-    }
+    await realKeyboardSubmit(tab, prompt);
   }
 }
 

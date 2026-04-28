@@ -87,6 +87,13 @@ return out
   const find = await runAppleScript(findScript);
   if (find.ok && find.stdout) {
     const [w, t] = find.stdout.split(",").map(Number);
+    await runAppleScript(`
+tell application "Google Chrome"
+  activate
+  set index of window ${w} to 1
+  set active tab index of window ${w} to ${t}
+end tell
+`);
     return { winIdx: w, tabIdx: t, target: `tab ${t} of window ${w}`, created: false };
   }
   const url = createUrl ?? `https://${urlMatch}/`;
