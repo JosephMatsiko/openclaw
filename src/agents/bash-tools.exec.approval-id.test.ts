@@ -619,6 +619,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-auto-node-elevated-default", {
       command: "echo gateway-ok",
       host: "node",
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("completed");
@@ -640,7 +641,11 @@ describe("exec approvals", () => {
       elevated: { enabled: true, allowed: true, defaultLevel: "ask" },
     });
 
-    const result = await tool.execute("call3", { command: "echo ok", elevated: true });
+    const result = await tool.execute("call3", {
+      command: "echo ok",
+      elevated: true,
+      elevateReason: "test approval reason",
+    });
     expect(result.details.status).toBe("completed");
     expect(calls).not.toContain("exec.approval.request");
   });
@@ -901,7 +906,11 @@ describe("exec approvals", () => {
 
     const tool = createElevatedAllowlistExecTool();
 
-    const result = await tool.execute("call4", { command: "echo ok", elevated: true });
+    const result = await tool.execute("call4", {
+      command: "echo ok",
+      elevated: true,
+      elevateReason: "test approval reason",
+    });
     expectPendingApprovalText(result, { command: "echo ok", host: "gateway" });
     await approvalSeen;
     expect(calls).toContain("exec.approval.request");
@@ -928,6 +937,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-gw-followup", {
       command: "echo ok",
       workdir: process.cwd(),
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("approval-pending");
@@ -969,6 +979,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-gw-followup-discord", {
       command: "echo ok",
       workdir: process.cwd(),
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("approval-pending");
@@ -1028,6 +1039,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-gw-followup-discord-delayed", {
       command: "printf delayed-ok",
       workdir: process.cwd(),
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("approval-pending");
@@ -1075,6 +1087,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-gw-followup-webchat", {
       command: "printf webchat-ok",
       workdir: process.cwd(),
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("approval-pending");
@@ -1117,6 +1130,7 @@ describe("exec approvals", () => {
     const result = await tool.execute("call-gw-followup-deny", {
       command: "echo ok",
       workdir: process.cwd(),
+      elevateReason: "test approval reason",
     });
 
     expect(result.details.status).toBe("approval-pending");
@@ -1162,10 +1176,12 @@ describe("exec approvals", () => {
     const first = await tool.execute("call-seq-1", {
       command: "printf approval-one",
       elevated: true,
+      elevateReason: "test approval reason",
     });
     const second = await tool.execute("call-seq-2", {
       command: "printf approval-two",
       elevated: true,
+      elevateReason: "test approval reason",
     });
 
     expect(first.details.status).toBe("approval-pending");

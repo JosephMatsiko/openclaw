@@ -335,6 +335,25 @@ function resolveRelevantSetupAutoEnablePluginIds(cfg: OpenClawConfig): string[] 
   return [...pluginIds].toSorted((left, right) => left.localeCompare(right));
 }
 
+function resolveBrowserSetupAutoEnableFallback(cfg: OpenClawConfig): string | undefined {
+  if (cfg.browser?.enabled === false || cfg.plugins?.entries?.browser?.enabled === false) {
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(cfg, "browser")) {
+    return "browser configured";
+  }
+  if (
+    cfg.plugins?.entries &&
+    Object.prototype.hasOwnProperty.call(cfg.plugins.entries, "browser")
+  ) {
+    return "browser plugin configured";
+  }
+  if (hasBrowserToolReference(cfg)) {
+    return "browser tool referenced";
+  }
+  return undefined;
+}
+
 function hasSetupAutoEnableRelevantConfig(cfg: OpenClawConfig): boolean {
   const entries = cfg.plugins?.entries;
   if (isRecord(cfg.browser) || isRecord(cfg.acp) || hasBrowserToolReference(cfg)) {
@@ -417,6 +436,9 @@ export function configMayNeedPluginAutoEnable(
   }
   if (!hasSetupAutoEnableRelevantConfig(cfg)) {
     return false;
+  }
+  if (resolveBrowserSetupAutoEnableFallback(cfg)) {
+    return true;
   }
   return (
     resolvePluginSetupAutoEnableReasons({
@@ -549,6 +571,22 @@ export function resolveConfiguredPluginAutoEnableCandidates(params: {
         pluginId: entry.pluginId,
         kind: "setup-auto-enable",
         reason: entry.reason,
+      });
+    }
+    const browserFallbackReason = resolveBrowserSetupAutoEnableFallback(params.config);
+    if (
+      browserFallbackReason &&
+      !changes.some(
+        (entry) =>
+          entry.pluginId === "browser" &&
+          entry.kind === "setup-auto-enable" &&
+          entry.reason === browserFallbackReason,
+      )
+    ) {
+      changes.push({
+        pluginId: "browser",
+        kind: "setup-auto-enable",
+        reason: browserFallbackReason,
       });
     }
   }

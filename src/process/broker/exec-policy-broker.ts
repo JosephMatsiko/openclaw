@@ -4,7 +4,7 @@ import { evaluateShellAllowlist } from "../../infra/exec-approvals-allowlist.js"
 import { loadExecApprovals, normalizeExecSecurity } from "../../infra/exec-approvals.js";
 import type { ExecAllowlistEntry } from "../../infra/exec-approvals.types.js";
 import { formatSandboxUnavailableMessage, probeSandboxRuntime } from "./sandbox-probe.js";
-import type { BrokerDecision, BrokerInput, ExecBroker } from "./types.js";
+import type { BrokerDecision, BrokerInput } from "./types.js";
 
 // Default allowed bin basenames when security="allowlist".
 // Only covers tools needed for a normal dev workflow — everything else
@@ -218,7 +218,7 @@ function checkChildArgv(argv: string[]): { allowed: boolean; code?: string; reas
   return { allowed: false, code: "allowlist-miss", reason: `${argv0} is not on the allowlist` };
 }
 
-export function createExecPolicyBroker(): ExecBroker {
+export function createExecPolicyBroker() {
   return {
     validate(input: BrokerInput): BrokerDecision {
       const security = resolveSecurityMode();

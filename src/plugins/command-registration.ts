@@ -1,4 +1,4 @@
-import { logVerbose } from "../globals.js";
+import { isVerbose } from "../global-state.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -193,7 +193,9 @@ export function registerPluginCommand(
     pluginName: opts?.pluginName,
     pluginRoot: opts?.pluginRoot,
   });
-  logVerbose(`Registered plugin command: ${key} (plugin: ${pluginId})`);
+  if (isVerbose()) {
+    console.log(`Registered plugin command: ${key} (plugin: ${pluginId})`);
+  }
   return { ok: true };
 }
 
