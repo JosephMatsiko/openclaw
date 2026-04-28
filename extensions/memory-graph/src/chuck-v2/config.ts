@@ -155,6 +155,7 @@ export function configWithSafeCliScoutSurfaces(
     ["openai", "chatgpt/mac-app"],
     ["google", "gemini/web-chat"],
     ["google", "aistudio/web"],
+    ["perplexity", "perplexity/web"],
   ].every(([family, surface]) => hasSurface(family as ChuckFamily, surface));
   if (hasAllConfiguredMembers) {
     return config;
@@ -162,6 +163,7 @@ export function configWithSafeCliScoutSurfaces(
   const anthropicBase = config.fleet.find((entry) => entry.family === "anthropic");
   const openAiBase = config.fleet.find((entry) => entry.family === "openai");
   const googleBase = config.fleet.find((entry) => entry.family === "google");
+  const perplexityBase = config.fleet.find((entry) => entry.family === "perplexity");
   const anthropicDefaults = {
     family: "anthropic" as const,
     commercialPolicy: "subscription-only" as const,
@@ -179,6 +181,12 @@ export function configWithSafeCliScoutSurfaces(
     commercialPolicy: "subscription-only" as const,
     quotaPolicy: "scarce" as const,
     weightPolicy: "full-vote" as const,
+  };
+  const perplexityDefaults = {
+    family: "perplexity" as const,
+    commercialPolicy: "subscription-only" as const,
+    quotaPolicy: "normal" as const,
+    weightPolicy: "partial-vote" as const,
   };
   const memberSurfaces: ChuckFleetEntry[] = [
     {
@@ -236,6 +244,14 @@ export function configWithSafeCliScoutSurfaces(
       rationale:
         "Google AI Studio Run-button surface; same Google family signal for developer-studio behavior and quota divergence, never an additional independent family vote.",
       capabilityProfile: "frontier-reasoning",
+    },
+    {
+      ...(perplexityBase ?? perplexityDefaults),
+      voice: "perplexity-web",
+      surface: "perplexity/web",
+      rationale:
+        "Perplexity browser surface; same Perplexity family signal and account-profile-sensitive fallback. May be Joseph's personal web account rather than the shared Max native/Comet profile, so receipts must tag observed profile and it never adds an independent family vote.",
+      capabilityProfile: "meta-router",
     },
   ];
   return normalizeChuckConfig({

@@ -34,7 +34,11 @@ const WINDOW_SIZE = [1100, 800];
 // no-active-field (caught 2026-04-28 panel smoke). Computed dynamically
 // from WINDOW_POS + WINDOW_SIZE so resizing the window relocates the
 // fallback automatically.
-const COMPOSER_Y_OFFSET_FROM_BOTTOM = 50;
+// In fullscreen, the real composer sits above the bottom toolbar row.
+// Live AX proof on 2026-04-28: main window y=33,h=923; composer scroll
+// area y=858.5,h=34, center ~=876. The old 50px offset clicked y=906,
+// below the input. Keep this as a fallback only; AX geometry below wins.
+const COMPOSER_Y_OFFSET_FROM_BOTTOM = 80;
 
 function dynamicComposerCenter() {
   const [px, py] = WINDOW_POS;
@@ -45,7 +49,7 @@ function dynamicComposerCenter() {
 const COORDS = {
   sidebarToggle: [70, 65],
   composerCenter: dynamicComposerCenter(),
-  newChatButton: [385, 65],
+  newChatButton: [73, 59],
   modelPill: [200, 100],
   thinkingToggle: [330, 770],
   replyCrop: [130, 140, 940, 570],
@@ -53,6 +57,31 @@ const COORDS = {
 
 const PROMPT_PREFIX = "[panel-ask]\n\n";
 const SHORT_PROOF_RE = /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/;
+const CHATGPT_TARGET_WINDOW_AS = `
+      set targetWin to missing value
+      set winCount to count of windows
+      repeat with i from 1 to winCount
+        try
+          if (role description of window i) is "standard window" then
+            set targetWin to window i
+            exit repeat
+          end if
+        end try
+      end repeat
+      if targetWin is missing value then
+        repeat with i from 1 to winCount
+          try
+            if (count of (entire contents of window i)) > 0 then
+              set targetWin to window i
+              exit repeat
+            end if
+          end try
+        end repeat
+      end if
+      if targetWin is missing value and winCount > 0 then
+        set targetWin to window 1
+      end if
+`;
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -123,9 +152,12 @@ async function findUiAnchor(purpose) {
           if labelText contains "message" then set hasComposerLabel to true
           if labelText contains "ask" then set hasComposerLabel to true
           if labelText contains "prompt" then set hasComposerLabel to true
-          if hasComposerLabel is false and y < 300 then return -9999
+          set isBottomInputShape to false
+          if w > 500 and h > 20 and h < 140 and y > 700 then set isBottomInputShape to true
+          if hasComposerLabel is false and isBottomInputShape is false then return -9999
           if roleText contains "text" then set score to score + 45
           if roleText contains "edit" then set score to score + 25
+          if roleText contains "scroll" and isBottomInputShape then set score to score + 42
           if labelText contains "message" then set score to score + 35
           if labelText contains "ask" then set score to score + 35
           if labelText contains "prompt" then set score to score + 30
@@ -133,6 +165,8 @@ async function findUiAnchor(purpose) {
           if w > 250 then set score to score + 12
           if h > 25 then set score to score + 8
           if y > 350 then set score to score + 14
+          if y > 820 then set score to score + 18
+          if isBottomInputShape then set score to score + 20
         else if purposeName is "new-chat" then
           set hasNewChatLabel to false
           if labelText contains "new chat" then set hasNewChatLabel to true
@@ -162,9 +196,9 @@ async function findUiAnchor(purpose) {
     end candidateScore
 
     tell application "System Events" to tell process "${APP_NAME}"
-      set winCount to count of windows
+      ${CHATGPT_TARGET_WINDOW_AS}
       if winCount is 0 then return ""
-      set targetWin to window 1
+      if targetWin is missing value then return ""
       set bestScore to -9999
       set bestX to 0
       set bestY to 0
@@ -232,8 +266,9 @@ async function findUiAnchor(purpose) {
 async function chatPaneA11yChildCount({ timeoutMs = 2500 } = {}) {
   const raw = await osa(
     `tell application "System Events" to tell process "${APP_NAME}"
-      if (count of windows) is 0 then return "0"
-      return (count of (entire contents of window 1) as text)
+      ${CHATGPT_TARGET_WINDOW_AS}
+      if winCount is 0 or targetWin is missing value then return "0"
+      return (count of (entire contents of targetWin) as text)
     end tell`,
     { timeoutMs },
   ).catch(() => "unknown");
@@ -447,6 +482,28 @@ function runtimeReplyCrop() {
   return [px + 20, py + 100, sx - 40, sy - 300];
 }
 
+function runtimeNewChatButton() {
+  const w = _runtimeWindow;
+  if (!w || !w.size?.[0]) {
+    return COORDS.newChatButton;
+  }
+  const [px, py] = w.pos;
+  return [px + 73, py + 26];
+}
+
+function runtimeSendButtonCenter() {
+  const w = _runtimeWindow;
+  if (!w || !w.size?.[0]) {
+    return [COORDS.composerCenter[0] + 460, COORDS.composerCenter[1] + 160];
+  }
+  const [px, py] = w.pos;
+  const [sx, sy] = w.size;
+  // ChatGPT fullscreen layout keeps the send button in the lower-right
+  // composer cluster. Live proof 2026-04-28: x = windowRight - 142,
+  // y = windowBottom - 35.
+  return [px + sx - 142, py + sy - 35];
+}
+
 async function standardizeWindow() {
   const w = await detectMainWindow();
   if (w) {
@@ -455,7 +512,10 @@ async function standardizeWindow() {
       // Can't resize a fullscreen window; leave it. Composer + crop
       // will recompute from the runtime window dimensions. Just raise.
       await osa(
-        `tell application "System Events" to tell process "${APP_NAME}" to perform action "AXRaise" of window 1`,
+        `tell application "System Events" to tell process "${APP_NAME}"
+          ${CHATGPT_TARGET_WINDOW_AS}
+          if targetWin is not missing value then perform action "AXRaise" of targetWin
+        end tell`,
       ).catch(() => {});
       await sleep(200);
       return;
@@ -500,6 +560,15 @@ async function newConversation() {
     await cliclick("kd:cmd");
     await cliclick("kp:n");
     await cliclick("ku:cmd");
+    await sleep(500);
+  } catch {
+    /* continue to explicit UI click */
+  }
+  // Cmd+N can leave fullscreen ChatGPT.app on the prior thread while
+  // only focusing the composer. Click the visible toolbar New Chat
+  // control as the canonical fullscreen path.
+  try {
+    await clickAt(runtimeNewChatButton());
     await sleep(900);
     return;
   } catch {
@@ -719,7 +788,7 @@ export async function askChatGPTMac({
     await sleep(200);
     await osa('tell application "System Events" to keystroke "v" using command down');
     await sleep(450);
-    await cliclick("kp:return");
+    await clickAt(runtimeSendButtonCenter());
     await sleep(initialWaitMs);
 
     const t0 = Date.now();
@@ -743,6 +812,28 @@ export async function askChatGPTMac({
         `[chatgpt-mac] tick: len=${state.reply.length} streaming=${state.streaming}\n`,
       );
       const shortProofToken = SHORT_PROOF_RE.test(state.reply);
+      if (!state.streaming && shortProofToken) {
+        try {
+          await emit({
+            source: "research-chatgpt-mac",
+            type: "chatgpt-mac-completed",
+            payload: {
+              model,
+              replyLen: state.reply.length,
+              latencyMs: Date.now() - t0,
+              thinkingMode,
+              proofToken: true,
+            },
+          });
+        } catch {
+          /* */
+        }
+        return {
+          text: state.reply,
+          modelUsed: `chatgpt-mac-app/${model}${thinkingMode ? " (thinking)" : ""}`,
+          threadDeleted: false,
+        };
+      }
       if (
         !state.streaming &&
         state.reply &&

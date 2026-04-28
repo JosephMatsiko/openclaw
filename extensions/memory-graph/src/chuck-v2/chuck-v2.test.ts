@@ -423,6 +423,9 @@ describe("Chuck V2 config", () => {
     const googleSurfaces = config.fleet
       .filter((entry) => entry.family === "google")
       .map((entry) => entry.surface);
+    const perplexitySurfaces = config.fleet
+      .filter((entry) => entry.family === "perplexity")
+      .map((entry) => entry.surface);
     expect(anthropicSurfaces).toEqual(["claude-cli/exec", "claude/web-chat", "claude/mac-app"]);
     expect(openAiSurfaces).toEqual([
       "chatgpt/web-chat",
@@ -431,9 +434,10 @@ describe("Chuck V2 config", () => {
       "chatgpt/mac-app",
     ]);
     expect(googleSurfaces).toEqual(["gemini/cli", "gemini/web-chat", "aistudio/web"]);
+    expect(perplexitySurfaces).toEqual(["perplexity/mac-app", "perplexity/web"]);
     expect(validateFleet(config.fleet)).toMatchObject({
       ok: true,
-      repeatedFamilies: ["anthropic", "openai", "google"],
+      repeatedFamilies: ["anthropic", "openai", "google", "perplexity"],
     });
     expect(configWithSafeCliScoutSurfaces(config).fleet).toHaveLength(config.fleet.length);
   });
