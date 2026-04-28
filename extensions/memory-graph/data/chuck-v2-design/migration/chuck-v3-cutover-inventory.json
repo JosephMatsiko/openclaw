@@ -1,0 +1,2149 @@
+{
+  "generatedAt": "2026-04-27T08:13:49.852Z",
+  "sources": {
+    "launchAgentsDir": "/Users/josephmatsiko/Library/LaunchAgents",
+    "capabilitiesPath": "/Users/josephmatsiko/.openclaw/workspace/state/apex-capabilities.json"
+  },
+  "summary": {
+    "launchAgents": 21,
+    "capabilities": 107,
+    "launchAgentDispositions": {
+      "keep-with-port-review": 2,
+      "port-behind-surface-lease-manager": 1,
+      "port-behind-resource-policy": 1,
+      "port-behind-credential-proxy": 1,
+      "port-behind-docket": 9,
+      "port-now-skeleton": 1,
+      "review": 1,
+      "retire-or-keep-disabled": 1,
+      "port-behind-media-intake-policy": 2,
+      "quarantine-until-daemon-matrix": 1,
+      "keep-readonly-if-verified": 1
+    },
+    "capabilityDispositions": {
+      "keep-as-tool-capability": 7,
+      "defer": 1,
+      "port-now-with-tests": 15,
+      "port-now-with-source-policy": 11,
+      "port-behind-kernel": 52,
+      "port-behind-credential-proxy": 2,
+      "rename-and-narrow": 9,
+      "port-behind-docket": 8,
+      "port-behind-authority-diff": 1,
+      "quarantine": 1
+    }
+  },
+  "launchAgents": [
+    {
+      "label": "ai.openclaw.gateway",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/ai.openclaw.gateway.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/dist/index.js gateway --port 18789",
+      "startInterval": null,
+      "keepAlive": true,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "keep-with-port-review",
+      "v3Target": "OpenClaw chassis",
+      "risk": "medium",
+      "reasons": [
+        "current OpenClaw chassis candidate",
+        "uses port 18789; check duplicate bind with sibling agent",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "ai.openclaw.node",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/ai.openclaw.node.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/dist/index.js node run --host 127.0.0.1 --port 18789",
+      "startInterval": null,
+      "keepAlive": true,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "keep-with-port-review",
+      "v3Target": "OpenClaw chassis",
+      "risk": "medium",
+      "reasons": [
+        "current OpenClaw chassis candidate",
+        "uses port 18789; check duplicate bind with sibling agent",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.apex-chrome",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.apex-chrome.plist",
+      "command": "/bin/bash /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-chrome-launchd.sh",
+      "startInterval": 1800,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-surface-lease-manager",
+      "v3Target": "surface adapters",
+      "risk": "medium",
+      "reasons": [
+        "browser profile lifecycle is useful but must be leased",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.apex-housekeeper",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.apex-housekeeper.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-housekeeper.mjs",
+      "startInterval": 60,
+      "keepAlive": false,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-resource-policy",
+      "v3Target": "resource governor",
+      "risk": "high",
+      "reasons": [
+        "can terminate/purge processes",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-anthropic-refresh",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-anthropic-refresh.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-anthropic-refresh.mjs",
+      "startInterval": 14400,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-credential-proxy",
+      "v3Target": "credential proxy",
+      "risk": "high",
+      "reasons": ["writes auth/token state", "plist exists but launchctl did not report it loaded"]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-apex-vanguard",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-apex-vanguard.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-vanguard.mjs",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-chuck-daemon",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-chuck-daemon.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/chuck-daemon/supervisor.mjs",
+      "startInterval": null,
+      "keepAlive": {
+        "Crashed": true,
+        "SuccessfulExit": false
+      },
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-now-skeleton",
+      "v3Target": "Chuck daemon shell",
+      "risk": "medium",
+      "reasons": [
+        "right skeleton for heartbeat/kill switch, but no unsafe workers before Kernel",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-chuck-phase-a-daily",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-chuck-phase-a-daily.plist",
+      "command": "/bin/bash /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/chuck-phase-a-daily.sh",
+      "startInterval": null,
+      "keepAlive": false,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-codex-persistence",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-codex-persistence.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/.openclaw/workspace/scripts/apex-codex-persistence-check.mjs",
+      "startInterval": 21600,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "review",
+      "v3Target": "operator continuity",
+      "risk": "medium",
+      "reasons": [
+        "workspace script outside repo; inspect before keeping",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-endeavor-quarterly",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-endeavor-quarterly.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/apex-endeavor-review.mjs --ping",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-gateway",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-gateway.plist.disabled",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/openclaw.mjs gateway run",
+      "startInterval": null,
+      "keepAlive": {
+        "Crashed": true,
+        "SuccessfulExit": false
+      },
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "retire-or-keep-disabled",
+      "v3Target": "operations",
+      "risk": "low",
+      "reasons": ["filename is disabled"]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-magazine-daily",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-magazine-daily.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/magazine.mjs --edition daily --apply",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-magazine-friday",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-magazine-friday.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/magazine.mjs --edition friday --apply",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-magazine-sunday",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-magazine-sunday.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/magazine.mjs --edition sunday --apply",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-magazine-weekend",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-magazine-weekend.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/magazine.mjs --edition weekend --apply",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-morning-brief",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-morning-brief.plist.disabled-layer2-m1",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/morning-brief.mjs --send",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "filename is disabled",
+        "valuable output loop but should route through Docket/attention budget"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-photo-analyzer",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-photo-analyzer.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/photo-analyzer.mjs --sweep",
+      "startInterval": 1800,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-media-intake-policy",
+      "v3Target": "document/media evidence",
+      "risk": "medium",
+      "reasons": [
+        "local media intake can be useful; needs scope and resource controls",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-photo-drop-ingest",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-photo-drop-ingest.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/photo-drop-ingest.mjs --hours 24 --limit 50",
+      "startInterval": 3600,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-media-intake-policy",
+      "v3Target": "document/media evidence",
+      "risk": "medium",
+      "reasons": [
+        "local media intake can be useful; needs scope and resource controls",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-summarize-day",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-summarize-day.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/summarize-day.mjs --yesterday --prune",
+      "startInterval": null,
+      "keepAlive": null,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "port-behind-docket",
+      "v3Target": "scheduled outputs",
+      "risk": "medium",
+      "reasons": [
+        "valuable output loop but should route through Docket/attention budget",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.josephmatsiko.openclaw-watchers",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.josephmatsiko.openclaw-watchers.plist",
+      "command": "/Users/josephmatsiko/.nvm/versions/node/v24.14.1/bin/node /Users/josephmatsiko/Projects/openclaw/extensions/memory-graph/scripts/watchers/index.mjs",
+      "startInterval": null,
+      "keepAlive": {
+        "Crashed": true,
+        "SuccessfulExit": false
+      },
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "quarantine-until-daemon-matrix",
+      "v3Target": "watcher registry",
+      "risk": "high",
+      "reasons": [
+        "many jobs/watchers; needs owners, leashes, resource budgets",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    },
+    {
+      "label": "com.openclaw.observability-watcher",
+      "file": "/Users/josephmatsiko/Library/LaunchAgents/com.openclaw.observability-watcher.plist",
+      "command": "/bin/bash /Users/josephmatsiko/.openclaw/workspace/scripts/run-watcher.sh",
+      "startInterval": null,
+      "keepAlive": true,
+      "loaded": false,
+      "running": false,
+      "pid": null,
+      "lastExit": null,
+      "disposition": "keep-readonly-if-verified",
+      "v3Target": "observability",
+      "risk": "low",
+      "reasons": [
+        "observability is useful if read-only and cheap",
+        "plist exists but launchctl did not report it loaded"
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "grayjay",
+      "kind": "desktop-client",
+      "role": "sovereign-youtube-client",
+      "probeType": "app-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "yt-dlp",
+      "kind": "cli",
+      "role": "sovereign-media-downloader",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "ffmpeg",
+      "kind": "cli",
+      "role": "media-toolkit",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "searxng",
+      "kind": "service",
+      "role": "sovereign-search",
+      "probeType": "http",
+      "autopromote": true,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "ollama",
+      "kind": "service-cli",
+      "role": "local-model-runner",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "defer",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": [
+        "Ollama intentionally uninstalled on 2026-04-27",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "docker",
+      "kind": "cli",
+      "role": "container-runtime-cli",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "pnpm",
+      "kind": "cli",
+      "role": "package-manager",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "kind": "cli",
+      "role": "fleet-secondary-research",
+      "probeType": "cli-health-check",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "directly supports Fleet readiness, routing, receipts, or policy",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "ripgrep",
+      "kind": "cli",
+      "role": "search-tool",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": true,
+      "missing": false,
+      "derived": false,
+      "disposition": "keep-as-tool-capability",
+      "v3Target": "tooling",
+      "risk": "medium",
+      "reasons": [
+        "useful tool capability; mutation paths need approval",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "chatgpt",
+      "kind": "subscription",
+      "role": "third-leg-expansion-twin-to-trinity",
+      "probeType": "always-ok",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["directly supports Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "claude-code",
+      "kind": "cli",
+      "role": "primary-agent-harness",
+      "probeType": "command-exists",
+      "autopromote": true,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "supports evidence gathering or field discovery; needs source policy",
+        "autocreate/autopromote must be disabled or approval-gated in V3"
+      ]
+    },
+    {
+      "id": "openclaw",
+      "kind": "self",
+      "role": "sovereign-gateway",
+      "probeType": "command-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": ["supports evidence gathering or field discovery; needs source policy"]
+    },
+    {
+      "id": "apex-better",
+      "kind": "self",
+      "role": "universal-exponential-loop",
+      "probeType": "always-ok",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["explicit memory/growth primitive; useful only behind Kernel and Docket gates"]
+    },
+    {
+      "id": "principle-layer",
+      "kind": "self",
+      "role": "architectural-principle-substrate",
+      "probeType": "always-ok",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["explicit memory/growth primitive; useful only behind Kernel and Docket gates"]
+    },
+    {
+      "id": "chrome-profile",
+      "kind": "browser-profile",
+      "role": "sovereign-vanguard-session",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-credential-proxy",
+      "v3Target": "credential proxy",
+      "risk": "high",
+      "reasons": ["touches credentials/auth continuity"]
+    },
+    {
+      "id": "apex-dispatch",
+      "kind": "self",
+      "role": "n-plex-dispatcher",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-panel-ask",
+      "kind": "self",
+      "role": "panel-broadcaster",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-twin",
+      "kind": "self",
+      "role": "twin-leg-dispatcher",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["directly supports Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-fleet-coordinator",
+      "kind": "self",
+      "role": "fleet-health-role-assigner",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-voice-canary",
+      "kind": "self",
+      "role": "per-voice-health-canary",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-route",
+      "kind": "self",
+      "role": "intent-router",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-exfil",
+      "kind": "self",
+      "role": "exfil-orchestrator",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": ["old broad language or data export behavior needs V3 policy boundary"]
+    },
+    {
+      "id": "apex-vanguard",
+      "kind": "self",
+      "role": "nightly-auditor",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["explicit memory/growth primitive; useful only behind Kernel and Docket gates"]
+    },
+    {
+      "id": "apex-reply",
+      "kind": "self",
+      "role": "reply-composer",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": ["external communication or voice surface needs approval and attention policy"]
+    },
+    {
+      "id": "apex-lookahead",
+      "kind": "self",
+      "role": "short-horizon-planner",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["explicit memory/growth primitive; useful only behind Kernel and Docket gates"]
+    },
+    {
+      "id": "apex-horizon-weekly",
+      "kind": "self",
+      "role": "weekly-planner",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["explicit memory/growth primitive; useful only behind Kernel and Docket gates"]
+    },
+    {
+      "id": "apex-proposer-telegram",
+      "kind": "self",
+      "role": "telegram-proposer",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": ["external communication or voice surface needs approval and attention policy"]
+    },
+    {
+      "id": "worker-probe",
+      "kind": "self",
+      "role": "voice-health-probe",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    },
+    {
+      "id": "apex-anticipator",
+      "kind": "self",
+      "role": "usage/pattern learning over the event bus",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-arc-initiator",
+      "kind": "self",
+      "role": "*proactively* spawns arcs from single triggers",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-arc-tracker",
+      "kind": "self",
+      "role": "multi-week composite-insight continuity tracker",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-beats",
+      "kind": "self",
+      "role": "declarative list of research beats per magazine edition",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "supports evidence gathering or field discovery; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-browser",
+      "kind": "self",
+      "role": "sovereign Chrome MCP server",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-capability-derive",
+      "kind": "self",
+      "role": "rebuilds `apex-capabilities.json` from what is",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-cf-signal",
+      "kind": "self",
+      "role": "reactive Cloudflare / bot-detection alarm emitter",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-chatgpt",
+      "kind": "self",
+      "role": "TWIN fallback leg via the real-Chrome Sovereign Vanguard session",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-chrome-cookies-sideload",
+      "kind": "self",
+      "role": "clones session cookies from Joseph's",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-credential-proxy",
+      "v3Target": "credential proxy",
+      "risk": "high",
+      "reasons": [
+        "touches credentials/auth continuity",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-chuck-memory",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-chuck-signature",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "explicit V3 primitive for Fleet readiness, routing, receipts, or policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-competitive-mapper",
+      "kind": "self",
+      "role": "maps competitor releases → endeavor priority shifts",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-computer",
+      "kind": "self",
+      "role": "sovereign computer-use MCP server for Chuck",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-authority-diff",
+      "v3Target": "computer-use",
+      "risk": "high",
+      "reasons": ["can act on local desktop or UI", "derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-contacts-enricher",
+      "kind": "self",
+      "role": "phone/email → contact name + ring guess",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-correlator",
+      "kind": "self",
+      "role": "cross-signal entity overlap detector",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-daily-digest",
+      "kind": "self",
+      "role": "morning one-message summary of yesterday's bus",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-dominance",
+      "kind": "self",
+      "role": "3-phase traversal of artificial barriers",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-dominion",
+      "kind": "self",
+      "role": "universal tool-invocation ledger + capability sentinel",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-drift-scan",
+      "kind": "self",
+      "role": "quarterly architectural delta tracker",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-endeavor-lint",
+      "kind": "self",
+      "role": "ring-invariant check across the scripts directory",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-endeavor-review",
+      "kind": "self",
+      "role": "quarterly strategic review",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-event-bus",
+      "kind": "self",
+      "role": "the ambient backbone",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-exfil-gmail",
+      "kind": "self",
+      "role": "Gmail exporter",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-exfil-grayjay",
+      "kind": "self",
+      "role": "Grayjay (YouTube / creator-follow) exporter",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-exfil-imessage",
+      "kind": "self",
+      "role": "iMessage exporter",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-exfil-obsidian",
+      "kind": "self",
+      "role": "Obsidian vault exporter",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-exfil-twitter",
+      "kind": "self",
+      "role": "Twitter / X archive ingest",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-feed-discovery",
+      "kind": "self",
+      "role": "unbounded feed absorption for ring-members",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-frontier-scan",
+      "kind": "self",
+      "role": "monthly scan of Anthropic + Gemini + MCP release",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-graph-usage",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "supports evidence gathering or field discovery; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-inferer",
+      "kind": "self",
+      "role": "nightly proposal generator",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-intercept",
+      "kind": "self",
+      "role": "Canonical Dominance",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "quarantine",
+      "v3Target": "optional intercept",
+      "risk": "high",
+      "reasons": [
+        "intercept mode is Phase 5 only and disabled by default",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-library",
+      "kind": "self",
+      "role": "unified search across shadow libraries + public archives",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "rename-and-narrow",
+      "v3Target": "evidence/archive/ledger",
+      "risk": "high",
+      "reasons": [
+        "old broad language or data export behavior needs V3 policy boundary",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-listen",
+      "kind": "self",
+      "role": "sovereign STT via faster-whisper",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-mcp-registry-watcher",
+      "kind": "self",
+      "role": "frontier-absorption pipeline",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-policy",
+      "kind": "self",
+      "role": "the never-compromise invariant, codified",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "explicit V3 primitive for Fleet readiness, routing, receipts, or policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-profile-pool",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "explicit runtime primitive; needs owner, resource budget, and receipts",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-profile-selector",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "explicit runtime primitive; needs owner, resource budget, and receipts",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-profile-worker-daemon",
+      "kind": "self",
+      "role": "always-on-daemon",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "explicit runtime primitive; needs owner, resource budget, and receipts",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-proposal-cleanup",
+      "kind": "self",
+      "role": "dedupe + cull + auto-implement + rich-digest",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-proposal-drain",
+      "kind": "self",
+      "role": "one-pass liquidation of the pending backlog",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-proposer-handler",
+      "kind": "self",
+      "role": "closes the proposal loop",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "explicit memory/growth primitive; useful only behind Kernel and Docket gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-rings",
+      "kind": "self",
+      "role": "living concentric-circle registry",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-rss",
+      "kind": "self",
+      "role": "minimal RSS/Atom parser shared by feed-based watchers",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-search",
+      "kind": "self",
+      "role": "sovereign raw-URL search surface",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-selector-registry",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "explicit V3 primitive for Fleet readiness, routing, receipts, or policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-speak",
+      "kind": "self",
+      "role": "Joseph's TTS front-door, open-source-first",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-sqlite-backup",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "explicit runtime primitive; needs owner, resource budget, and receipts",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-stats",
+      "kind": "self",
+      "role": "quick observability surface for the bus + daemon",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-telegram-gate",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-toolkit",
+      "kind": "self",
+      "role": "generalist MCP for frontier-capability tools",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-source-policy",
+      "v3Target": "evidence/discovery",
+      "risk": "medium",
+      "reasons": [
+        "explicit evidence/discovery primitive; needs source policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-usage-heat",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-vanguard-principle-audit",
+      "kind": "self",
+      "role": "apex-script",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-vanguard-trigger",
+      "kind": "self",
+      "role": "event-driven hygiene dispatcher",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "directly supports Fleet readiness, routing, receipts, or policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-video",
+      "kind": "self",
+      "role": "sovereign video-understanding pipeline",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-video-trigger",
+      "kind": "self",
+      "role": "compounding job that turns discovered video URLs",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-voice-live",
+      "kind": "self",
+      "role": "real-time bidirectional voice chat via Gemini Live API",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": [
+        "directly supports Fleet readiness, routing, receipts, or policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "apex-webhook-inbound",
+      "kind": "self",
+      "role": "sovereign HTTP receiver that emits to the event bus",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "apex-year-in-review",
+      "kind": "self",
+      "role": "annual retrospective compiler",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "capability inventory",
+      "risk": "medium",
+      "reasons": ["derived entry; review before any auto-action"]
+    },
+    {
+      "id": "com.josephmatsiko.apex-chrome",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-apex-vanguard",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-endeavor-quarterly",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-magazine-daily",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": [
+        "memory, proposal, or growth behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-magazine-friday",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-magazine-sunday",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-magazine-weekend",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-photo-analyzer",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-photo-drop-ingest",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-summarize-day",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "com.josephmatsiko.openclaw-watchers",
+      "kind": "launchd",
+      "role": "scheduled-background-job",
+      "probeType": "launchd-loaded",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "cron:d38f7a84-73ff-4237-ae26-c0207713d065",
+      "kind": "openclaw-cron",
+      "role": "openclaw-scheduled-agent-turn",
+      "probeType": "openclaw-cron-listed",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "cron:f6b0e469-ff01-476f-8c7b-e72f33d26c03",
+      "kind": "openclaw-cron",
+      "role": "openclaw-scheduled-agent-turn",
+      "probeType": "openclaw-cron-listed",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "cron:18dda1ad-471d-4575-b56b-e8f17eeb1f56",
+      "kind": "openclaw-cron",
+      "role": "openclaw-scheduled-agent-turn",
+      "probeType": "openclaw-cron-listed",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-kernel",
+      "v3Target": "ops/runtime",
+      "risk": "high",
+      "reasons": [
+        "runtime or self-modifying behavior needs Kernel gates",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "channel:chat:imessage",
+      "kind": "openclaw-channel",
+      "role": "chat-surface",
+      "probeType": "openclaw-channel-enabled",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "channel:chat:telegram",
+      "kind": "openclaw-channel",
+      "role": "chat-surface",
+      "probeType": "openclaw-channel-enabled",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "channel:chat:whatsapp",
+      "kind": "openclaw-channel",
+      "role": "chat-surface",
+      "probeType": "openclaw-channel-enabled",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": true,
+      "disposition": "port-behind-docket",
+      "v3Target": "channels/interface",
+      "risk": "high",
+      "reasons": [
+        "external communication or voice surface needs approval and attention policy",
+        "derived entry; review before any auto-action"
+      ]
+    },
+    {
+      "id": "memory-pressure-warden",
+      "kind": "self",
+      "role": "macOS memory + swap pressure observer; proposes relief candidates",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["memory, proposal, or growth behavior needs Kernel gates"]
+    },
+    {
+      "id": "apex-housekeeper",
+      "kind": "self",
+      "role": "autonomous memory reaper; reaps orphans + stale apex children + sudo purge with productivity-preserving immunity",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-behind-kernel",
+      "v3Target": "memory/growth",
+      "risk": "high",
+      "reasons": ["memory, proposal, or growth behavior needs Kernel gates"]
+    },
+    {
+      "id": "apex-nplex-adjudicate",
+      "kind": "self",
+      "role": "Adversarial Fleet orchestrator (Chuck V2 / AEE thesis); fans out one prompt to N distinct families (currently 5: anthropic, openai, google, perplexity, sovereign-local), attributes producer-family, builds alignment matrix, classifies protocol (UNANIMOUS / OUTLIER / SCHISM / FRAGMENT / IMPERSONATION_DETECTED)",
+      "probeType": "file-exists",
+      "autopromote": false,
+      "autocreate": false,
+      "missing": false,
+      "derived": false,
+      "disposition": "port-now-with-tests",
+      "v3Target": "fleet/kernel health",
+      "risk": "medium",
+      "reasons": ["explicit V3 primitive for Fleet readiness, routing, receipts, or policy"]
+    }
+  ]
+}

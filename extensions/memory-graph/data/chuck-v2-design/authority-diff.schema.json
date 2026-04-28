@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/chuck-v3/authority-diff.schema.json",
+  "title": "Chuck V3 AuthorityDiff",
+  "description": "Typed diff for patches that change Chuck authority, protected paths, credentials, sandbox policy, thresholds, allowlists, or capability reach.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "diffId",
+    "generatedAt",
+    "targetPaths",
+    "protectedPathVerdict",
+    "addedCapabilities",
+    "removedCapabilities",
+    "riskClass",
+    "operatorApprovalRequired",
+    "reasons"
+  ],
+  "properties": {
+    "diffId": {
+      "type": "string",
+      "pattern": "^authdiff-[a-f0-9]{16}$"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "targetPaths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "protectedPathVerdict": {
+      "enum": ["clear", "touches-tier0", "unknown"]
+    },
+    "addedCapabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capabilityId"
+      },
+      "uniqueItems": true
+    },
+    "removedCapabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capabilityId"
+      },
+      "uniqueItems": true
+    },
+    "riskClass": {
+      "enum": ["none", "low", "medium", "high", "destructive"]
+    },
+    "operatorApprovalRequired": {
+      "type": "boolean"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "capabilityId": {
+      "enum": [
+        "shell.run",
+        "network.fetch",
+        "filesystem.read",
+        "filesystem.write",
+        "filesystem.delete",
+        "credentials.read",
+        "credentials.write",
+        "browser.drive",
+        "code.eval",
+        "sandbox.policy",
+        "kernel.policy",
+        "stake.policy",
+        "vault.write",
+        "threshold.modify",
+        "unknown"
+      ]
+    }
+  }
+}
