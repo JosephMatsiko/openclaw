@@ -188,3 +188,12 @@ extensions/qa-lab/web/dist/
 # Generated bundled plugin runtime dependency manifests
 extensions/**/.openclaw-runtime-deps.json
 extensions/**/.openclaw-runtime-deps-stamp.json
+
+# Local Chuck/Apex salvage. These files may remain available on Joseph's Mac,
+# but they are parked local capability inventory until promoted deliberately.
+# Promotion requires `git add -f` plus Kernel review/authority diff where needed.
+.gemini/
+extensions/memory-graph/.apex-preserved
+extensions/memory-graph/data/registries/apex-*.json
+extensions/memory-graph/scripts/apex-*
+skills/apex-*/

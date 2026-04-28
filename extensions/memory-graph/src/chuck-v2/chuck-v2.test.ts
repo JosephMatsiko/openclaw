@@ -4865,6 +4865,7 @@ describe("Chuck V2 repo hygiene", () => {
       [
         " M extensions/memory-graph/src/engine.ts",
         "?? extensions/memory-graph/scripts/apex-old-tool.mjs",
+        "?? extensions/memory-graph/scripts/apex-exfil-gmail.mjs",
         "?? extensions/memory-graph/scripts/apex-other-tool.mjs",
         "?? extensions/memory-graph/scripts/chuck-new-driver.mjs",
         "?? ui-phone-v3/src/views/fleet.ts",
@@ -4875,7 +4876,9 @@ describe("Chuck V2 repo hygiene", () => {
     expect(report.selfBuildSafe).toBe(false);
     expect(report.buckets.map((bucket) => bucket.bucket)).toContain("memory-graph-extension");
     expect(report.buckets.map((bucket) => bucket.bucket)).toContain("chuck-surface-drivers");
+    expect(report.buckets.map((bucket) => bucket.bucket)).toContain("apex-quarantine");
     expect(report.blockers.join("\n")).toContain("tracked core/extension");
+    expect(report.blockers.join("\n")).toContain("high-risk Apex");
     expect(report.blockers.join("\n")).toContain("untracked source-like");
     expect(formatRepoHygieneReport(report)).toContain("Self-build safe: no");
     const plan = planRepoHygiene(report, { now: "2026-04-28T00:00:00.000Z" });
@@ -4901,6 +4904,7 @@ describe("Chuck V2 repo hygiene", () => {
         "?? extensions/memory-graph/src/chuck-v2/",
         "?? extensions/memory-graph/scripts/chuck-dashboard.mjs",
         "?? extensions/memory-graph/scripts/apex-old-tool.mjs",
+        "?? extensions/memory-graph/scripts/apex-dominance.mjs",
         "?? ui-phone-v3/src/views/fleet.ts",
       ].join("\n"),
     );
@@ -4928,6 +4932,10 @@ describe("Chuck V2 repo hygiene", () => {
       "extensions/memory-graph/scripts/chuck-dashboard.mjs",
     );
     expect(byId.get("apex-salvage")?.disposition).toBe("promote-or-archive");
+    expect(byId.get("apex-quarantine")?.paths).toEqual([
+      "extensions/memory-graph/scripts/apex-dominance.mjs",
+    ]);
+    expect(byId.get("apex-quarantine")?.disposition).toBe("archive-or-ignore");
     expect(byId.get("openclaw-core-bridge")?.risk).toBe("high");
     expect(byId.get("phone-ui")?.paths).toContain("ui-phone-v3/src/views/fleet.ts");
   });

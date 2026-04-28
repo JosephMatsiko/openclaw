@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +12,7 @@ export type RepoHygieneBucketName =
   | "chuck-v2-source"
   | "chuck-surface-drivers"
   | "chuck-v3-docs"
+  | "apex-quarantine"
   | "apex-salvage"
   | "memory-graph-extension"
   | "phone-ui"
@@ -223,9 +225,12 @@ export function planRepoHygiene(
   const untrackedSourceCount = report.entries.filter(
     (entry) =>
       entry.untracked &&
-      !["local-generated", "chuck-v3-docs", "apex-salvage"].includes(entry.bucket),
+      !["local-generated", "chuck-v3-docs", "apex-salvage", "apex-quarantine"].includes(
+        entry.bucket,
+      ),
   ).length;
   const apexSalvage = byBucket.get("apex-salvage");
+  const apexQuarantine = byBucket.get("apex-quarantine");
   const lanes: RepoHygieneLane[] = [
     {
       id: "freeze-current-state",
@@ -277,7 +282,9 @@ export function planRepoHygiene(
         .filter(
           (entry) =>
             entry.untracked &&
-            !["local-generated", "chuck-v3-docs", "apex-salvage"].includes(entry.bucket),
+            !["local-generated", "chuck-v3-docs", "apex-salvage", "apex-quarantine"].includes(
+              entry.bucket,
+            ),
         )
         .slice(0, 8)
         .map((entry) => entry.path),
@@ -298,6 +305,19 @@ export function planRepoHygiene(
         apexSalvage && apexSalvage.total > 0
           ? "promote useful tools into Chuck modules; archive or exclude the rest"
           : "no Apex salvage cleanup needed",
+    },
+    {
+      id: "quarantine-high-risk-apex",
+      title: "Quarantine high-risk Apex tools",
+      status: apexQuarantine && apexQuarantine.total > 0 ? "needs-classification" : "safe-now",
+      rationale:
+        "Archive/export, credential, paywall, browser-cookie, launchd, and install tools are authority-bearing and must not enter ordinary self-build scope.",
+      pathCount: apexQuarantine?.total ?? 0,
+      examplePaths: apexQuarantine?.examples.map((entry) => entry.path) ?? [],
+      nextAction:
+        apexQuarantine && apexQuarantine.total > 0
+          ? "keep parked locally or promote through Kernel approval with explicit authority diff"
+          : "no high-risk Apex quarantine needed",
     },
   ];
   return {
@@ -320,6 +340,7 @@ export function planRepoHygiene(
       "checkpoint-tracked-core",
       "classify-source-like-untracked",
       "salvage-ledger",
+      "quarantine-high-risk-apex",
       "targeted-self-build",
     ],
   };
@@ -518,6 +539,19 @@ export function repoHygieneLaneManifests({
       ],
     },
     {
+      laneId: "apex-quarantine",
+      title: "High-risk Apex salvage",
+      disposition: "archive-or-ignore",
+      risk: "high",
+      rationale:
+        "Archive/export, credential, paywall, browser-cookie, launchd, and install tools are useful but authority-bearing. They remain local salvage unless promoted through Kernel approval.",
+      paths: pathsFor((path) => repoHygieneBucket(path) === "apex-quarantine"),
+      commandHints: [
+        "park locally with .gitignore or move to a state archive; do not run during cleanup",
+        "promote only through an authority diff and explicit operator approval",
+      ],
+    },
+    {
       laneId: "apex-salvage",
       title: "Apex salvage and old tools",
       disposition: "promote-or-archive",
@@ -574,6 +608,75 @@ export function repoHygieneLaneManifests({
     .filter((manifest) => manifest.paths.length > 0 || manifest.laneId === "repo-unavailable");
 }
 
+// Cache for the .apex-preserved allowlist. Re-read when the file's mtime
+// changes so edits take effect without process restart.
+let apexPreservedCache: { mtimeMs: number; rules: string[] } | null = null;
+
+function readApexPreserved(): string[] {
+  // Allowlist file lives at extensions/memory-graph/.apex-preserved relative
+  // to repo root. Each line is a path or simple glob (relative to
+  // extensions/memory-graph/). When a path classified as "apex-salvage"
+  // matches an allowlist rule, it is reclassified as "memory-graph-extension"
+  // so repo-hygiene treats it as kept content instead of salvage candidate.
+  const repoRoot = process.env.OPENCLAW_REPO_ROOT ?? process.cwd();
+  const allowlistPath = join(repoRoot, "extensions", "memory-graph", ".apex-preserved");
+  try {
+    const fileStat = statSync(allowlistPath);
+    if (apexPreservedCache && apexPreservedCache.mtimeMs === fileStat.mtimeMs) {
+      return apexPreservedCache.rules;
+    }
+    const text = readFileSync(allowlistPath, "utf8");
+    const rules = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"));
+    apexPreservedCache = { mtimeMs: fileStat.mtimeMs, rules };
+    return rules;
+  } catch {
+    apexPreservedCache = { mtimeMs: 0, rules: [] };
+    return [];
+  }
+}
+
+function matchesGlob(rule: string, candidate: string): boolean {
+  // Supports simple * and ** wildcards within a single path segment / across
+  // path segments. Anchored to start; trailing implicit.
+  if (rule === candidate) {
+    return true;
+  }
+  const escaped = rule
+    .replaceAll(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("**", "::DOUBLESTAR::")
+    .replaceAll("*", "[^/]*")
+    .replaceAll("::DOUBLESTAR::", ".*");
+  const re = new RegExp(`^${escaped}$`);
+  return re.test(candidate);
+}
+
+function isApexPreserved(path: string): boolean {
+  // path is repo-root-relative (e.g. extensions/memory-graph/scripts/apex-X.mjs).
+  // Allowlist entries are relative to extensions/memory-graph/, so strip prefix.
+  const prefix = "extensions/memory-graph/";
+  if (!path.startsWith(prefix)) {
+    return false;
+  }
+  const relative = path.slice(prefix.length);
+  const rules = readApexPreserved();
+  return rules.some((rule) => matchesGlob(rule, relative));
+}
+
+function isHighRiskApexPath(path: string): boolean {
+  if (path.startsWith("skills/apex-deepread/") || path.startsWith("skills/apex-library/")) {
+    return true;
+  }
+  if (!path.startsWith("extensions/memory-graph/scripts/apex-")) {
+    return false;
+  }
+  return /\/apex-(?:exfil(?:-|\.mjs)|dominance\.mjs|dominion\.mjs|anthropic-refresh\.mjs|apple-bridge\.mjs|chrome-cookies-sideload\.mjs|bootstrap\.sh|enable-plugins\.sh|housekeeper-setup\.sh|install-|intercept\.mjs|provision\.mjs|sqlite-backup-install\.sh|profile-worker-daemon\.mjs|firewall\.mjs)/.test(
+    path,
+  );
+}
+
 export function repoHygieneBucket(path: string): RepoHygieneBucketName {
   if (path.startsWith("extensions/memory-graph/src/chuck-v2/")) {
     return "chuck-v2-source";
@@ -587,7 +690,16 @@ export function repoHygieneBucket(path: string): RepoHygieneBucketName {
   if (path.startsWith("extensions/memory-graph/data/chuck-v2-design/")) {
     return "chuck-v3-docs";
   }
+  if (isHighRiskApexPath(path)) {
+    return "apex-quarantine";
+  }
   if (path.startsWith("extensions/memory-graph/scripts/apex-") || path.startsWith("skills/apex-")) {
+    // Honor the .apex-preserved allowlist before classifying as salvage.
+    // Joseph's apex-* MCP universe is preserved-untracked; the allowlist
+    // distinguishes "kept" from "candidate for archive".
+    if (isApexPreserved(path)) {
+      return "memory-graph-extension";
+    }
     return "apex-salvage";
   }
   if (path.startsWith("extensions/memory-graph/")) {
@@ -821,10 +933,18 @@ function repoHygieneBlockers(entries: RepoHygieneEntry[]): string[] {
       `${apexSalvage.length} Apex salvage file(s) should be archived, promoted, or excluded from active build scope`,
     );
   }
+  const apexQuarantine = entries.filter((entry) => entry.bucket === "apex-quarantine");
+  if (apexQuarantine.length > 0) {
+    blockers.push(
+      `${apexQuarantine.length} high-risk Apex salvage file(s) must be parked locally or promoted through Kernel approval`,
+    );
+  }
   const untrackedSource = entries.filter(
     (entry) =>
       entry.untracked &&
-      !["local-generated", "chuck-v3-docs", "apex-salvage"].includes(entry.bucket),
+      !["local-generated", "chuck-v3-docs", "apex-salvage", "apex-quarantine"].includes(
+        entry.bucket,
+      ),
   );
   if (untrackedSource.length > 0) {
     blockers.push(`${untrackedSource.length} untracked source-like file(s) need classification`);
@@ -845,6 +965,11 @@ function repoHygieneNextActions(entries: RepoHygieneEntry[], blockers: string[])
   if (blockers.some((blocker) => blocker.includes("Apex salvage"))) {
     actions.push(
       "move Apex salvage through the salvage ledger: promote, archive, or exclude from active build scope",
+    );
+  }
+  if (blockers.some((blocker) => blocker.includes("high-risk Apex"))) {
+    actions.push(
+      "park high-risk Apex tools locally or promote them through Kernel approval with authority diffs",
     );
   }
   if (blockers.some((blocker) => blocker.includes("untracked source-like"))) {
