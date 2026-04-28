@@ -895,6 +895,11 @@ function latestUpstreamSyncCheckpointStatus() {
     packageVersion: report?.available ? report.packageVersion : null,
     describe: report?.available ? report.describe : null,
     latestStableTag: report?.available ? report.latestStableTag : null,
+    stableContained: report?.available ? report.stableContained : null,
+    stableMissingCommits: report?.available ? report.stableMissingCommits : null,
+    localCommitsAfterStable: report?.available ? report.localCommitsAfterStable : null,
+    mainMissingCommits: report?.available ? report.mainMissingCommits : null,
+    localCommitsAheadOfMain: report?.available ? report.localCommitsAheadOfMain : null,
     stableBehind: report?.available ? report.stableBehind : null,
     mainBehind: report?.available ? report.mainBehind : null,
     localDirty: report?.available ? report.localDirty : null,
@@ -2698,7 +2703,8 @@ const DASHBOARD_HTML = `<!doctype html>
       metric("package", checkpoint.packageVersion || "unknown"),
       metric("branch", checkpoint.currentBranch || "unknown"),
       metric("latest stable", checkpoint.latestStableTag || "unknown"),
-      metric("stable drift", checkpoint.stableBehind ? "behind/different" : "current"),
+      metric("stable sync", upstreamStableLabel(checkpoint)),
+      metric("after stable", checkpoint.localCommitsAfterStable == null ? "unknown" : checkpoint.localCommitsAfterStable + " local"),
       metric("local dirt", checkpoint.localDirty ? "yes" : "no"),
       metric("broad sync", checkpoint.broadSyncAllowed ? "allowed" : "blocked"),
     ].join("");
@@ -2712,6 +2718,16 @@ const DASHBOARD_HTML = `<!doctype html>
       ].join("") + '</div></div>' +
       (blockers ? '<div class="card" style="margin-bottom:10px;"><div class="col-title">Sync Gates</div><ul class="princ">' + blockers + '</ul></div>' : '') +
       '<div class="card"><div class="col-title">Next</div><ul class="princ">' + (next || '<li><span class="slug">no upstream sync action needed</span><span class="w">ok</span></li>') + '</ul></div>';
+  }
+
+  function upstreamStableLabel(checkpoint) {
+    if (!checkpoint?.latestStableTag) { return "unknown"; }
+    if (checkpoint.stableBehind) {
+      const n = checkpoint.stableMissingCommits == null ? "?" : checkpoint.stableMissingCommits;
+      return "behind by " + n;
+    }
+    if (checkpoint.stableContained) { return "current"; }
+    return "different";
   }
 
   function renderModelDoctor(d) {

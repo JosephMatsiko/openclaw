@@ -18,6 +18,11 @@ export type UpstreamSyncReport = {
   latestStableTag?: string;
   latestStableSha?: string;
   upstreamMainSha?: string;
+  stableContained: boolean;
+  stableMissingCommits: number;
+  localCommitsAfterStable: number;
+  mainMissingCommits: number;
+  localCommitsAheadOfMain: number;
   stableBehind: boolean;
   mainBehind: boolean;
   localDirty: boolean;
@@ -93,10 +98,21 @@ export async function inspectUpstreamSync({
             text.trim(),
           )
         : undefined;
+    const stableDivergence = latestStableSha
+      ? await gitAheadBehind(repoRoot, latestStableSha, "HEAD")
+      : { left: 0, right: 0 };
+    const mainDivergence = mainSha
+      ? await gitAheadBehind(repoRoot, mainSha, "HEAD")
+      : { left: 0, right: 0 };
     const repoHygiene = await inspectRepoHygiene({ repoRoot });
     const localDirty = repoHygiene.available ? !repoHygiene.clean : true;
-    const stableBehind = Boolean(latestStableSha && latestStableSha !== headSha);
-    const mainBehind = Boolean(mainSha && mainSha !== headSha);
+    const stableMissingCommits = stableDivergence.left;
+    const localCommitsAfterStable = stableDivergence.right;
+    const mainMissingCommits = mainDivergence.left;
+    const localCommitsAheadOfMain = mainDivergence.right;
+    const stableContained = Boolean(latestStableSha && stableMissingCommits === 0);
+    const stableBehind = Boolean(latestStableSha && stableMissingCommits > 0);
+    const mainBehind = Boolean(mainSha && mainMissingCommits > 0);
     const blockers = upstreamSyncBlockers({
       localDirty,
       repoHygiene,
@@ -115,6 +131,11 @@ export async function inspectUpstreamSync({
       latestStableTag,
       latestStableSha,
       upstreamMainSha: mainSha || undefined,
+      stableContained,
+      stableMissingCommits,
+      localCommitsAfterStable,
+      mainMissingCommits,
+      localCommitsAheadOfMain,
       stableBehind,
       mainBehind,
       localDirty,
@@ -188,8 +209,8 @@ export function formatUpstreamSyncReport(report: AnyUpstreamSyncReport): string 
     `Describe: ${report.describe}`,
     `Upstream remote: ${report.upstreamRemote}`,
     `Latest stable tag: ${report.latestStableTag ?? "unknown"}`,
-    `Stable drift: ${report.stableBehind ? "behind/different" : "at latest stable tag"}`,
-    `Main drift: ${report.mainBehind ? "different from upstream main" : "matches upstream main"}`,
+    `Stable sync: ${stableSyncStatus(report)}`,
+    `Main drift: ${mainDriftStatus(report)}`,
     `Local dirt: ${report.localDirty ? "yes" : "no"}`,
     `Broad sync allowed: ${report.broadSyncAllowed ? "yes" : "no"}`,
   ];
@@ -241,7 +262,7 @@ function upstreamSyncBlockers({
     blockers.push(`${total} local dirty path(s) must be checkpointed, committed, or parked first`);
   }
   if (!stableBehind) {
-    blockers.push("no stable-release sync needed right now");
+    return blockers;
   }
   return blockers;
 }
@@ -259,9 +280,9 @@ function upstreamSyncNextActions({
     return [
       "finish repo lane cleanup or commit the current lane checkpoints",
       "create an upstream-sync checkpoint after the repo is clean",
-      latestStableTag
+      stableBehind && latestStableTag
         ? `sync on a named lane against ${latestStableTag}, then rerun focused Kernel/OpenClaw tests`
-        : "fetch tags and resolve latest stable release before syncing",
+        : "no stable sync needed after this lane is clean; keep the release watcher active",
     ];
   }
   if (stableBehind && latestStableTag) {
@@ -272,6 +293,42 @@ function upstreamSyncNextActions({
     ];
   }
   return ["no stable-release sync needed; keep watcher active"];
+}
+
+function stableSyncStatus(report: UpstreamSyncReport): string {
+  if (!report.latestStableTag) {
+    return "unknown";
+  }
+  if (report.stableBehind) {
+    const missing = pluralize(report.stableMissingCommits, "commit");
+    return `behind ${report.latestStableTag} by ${missing}`;
+  }
+  if (report.stableContained) {
+    const ahead = pluralize(report.localCommitsAfterStable, "local commit");
+    return `current; ${report.latestStableTag} is merged (${ahead} after stable)`;
+  }
+  return `not comparable with ${report.latestStableTag}`;
+}
+
+function mainDriftStatus(report: UpstreamSyncReport): string {
+  if (!report.upstreamMainSha) {
+    return "unknown";
+  }
+  if (!report.mainBehind && report.localCommitsAheadOfMain === 0) {
+    return "matches upstream main";
+  }
+  return [
+    report.mainBehind
+      ? `${pluralize(report.mainMissingCommits, "upstream commit")} not in HEAD`
+      : "no upstream-main commits missing",
+    report.localCommitsAheadOfMain > 0
+      ? `${pluralize(report.localCommitsAheadOfMain, "local commit")} not on upstream main`
+      : "no local commits ahead",
+  ].join("; ");
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function upstreamSyncRemediationMarkdown({
@@ -333,6 +390,7 @@ function upstreamSyncRemediationMarkdown({
 
 function upstreamSyncCommandPlan({ report }: { report: AnyUpstreamSyncReport }): string {
   const tag = report.available ? report.latestStableTag : undefined;
+  const syncNeeded = report.available ? report.stableBehind : false;
   const lines = [
     "#!/usr/bin/env bash",
     "# Review-only command plan generated by Chuck upstream sync.",
@@ -345,7 +403,7 @@ function upstreamSyncCommandPlan({ report }: { report: AnyUpstreamSyncReport }):
     "",
     "# Then, in a named lane:",
   ];
-  if (tag) {
+  if (tag && syncNeeded) {
     lines.push(
       `# git fetch origin --tags --prune`,
       `# git switch -c upstream-sync/${tag.replace(/^v/, "")}`,
@@ -353,6 +411,11 @@ function upstreamSyncCommandPlan({ report }: { report: AnyUpstreamSyncReport }):
       "# pnpm test extensions/memory-graph/src/chuck-v2/chuck-v2.test.ts",
       "# pnpm tsgo:extensions",
       "# pnpm tsgo:core",
+    );
+  } else if (tag) {
+    lines.push(
+      `# git fetch origin --tags --prune`,
+      `# echo '${tag} is already contained in HEAD; no stable merge needed.'`,
     );
   } else {
     lines.push("# git fetch origin --tags --prune");
@@ -431,4 +494,23 @@ async function gitText(repoRoot: string, args: string[]): Promise<string> {
     maxBuffer: 64 * 1024 * 1024,
   });
   return result.stdout;
+}
+
+async function gitAheadBehind(
+  repoRoot: string,
+  leftRef: string,
+  rightRef: string,
+): Promise<{ left: number; right: number }> {
+  try {
+    const text = await gitText(repoRoot, [
+      "rev-list",
+      "--left-right",
+      "--count",
+      `${leftRef}...${rightRef}`,
+    ]);
+    const [left = "0", right = "0"] = text.trim().split(/\s+/);
+    return { left: Number(left) || 0, right: Number(right) || 0 };
+  } catch {
+    return { left: 0, right: 0 };
+  }
 }
