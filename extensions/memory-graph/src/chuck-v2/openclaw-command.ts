@@ -23,6 +23,7 @@ export type ChuckCommandKind =
   | "docket"
   | "hygiene"
   | "github-hygiene"
+  | "upstream-sync"
   | "surface-atlas"
   | "scout"
   | "onboard"
@@ -62,6 +63,7 @@ export type ChuckCommandDeps = {
   runDoctor: typeof runDoctorFromOpenClawCommand;
   readRepoHygiene: typeof readRepoHygieneFromOpenClawCommand;
   readGitHubHygiene: typeof readGitHubHygieneFromOpenClawCommand;
+  readUpstreamSync: typeof readUpstreamSyncFromOpenClawCommand;
   readDocket: typeof readDocketFromOpenClawCommand;
   runOnboard: typeof runOnboardFromOpenClawCommand;
   runBuild: typeof runBuildFromOpenClawCommand;
@@ -97,6 +99,7 @@ export function createChuckOpenClawCommand({
     runDoctor: deps.runDoctor ?? runDoctorFromOpenClawCommand,
     readRepoHygiene: deps.readRepoHygiene ?? readRepoHygieneFromOpenClawCommand,
     readGitHubHygiene: deps.readGitHubHygiene ?? readGitHubHygieneFromOpenClawCommand,
+    readUpstreamSync: deps.readUpstreamSync ?? readUpstreamSyncFromOpenClawCommand,
     readDocket: deps.readDocket ?? readDocketFromOpenClawCommand,
     runOnboard: deps.runOnboard ?? runOnboardFromOpenClawCommand,
     runBuild: deps.runBuild ?? runBuildFromOpenClawCommand,
@@ -128,6 +131,7 @@ export async function handleChuckOpenClawCommand(
       runDoctor: runDoctorFromOpenClawCommand,
       readRepoHygiene: readRepoHygieneFromOpenClawCommand,
       readGitHubHygiene: readGitHubHygieneFromOpenClawCommand,
+      readUpstreamSync: readUpstreamSyncFromOpenClawCommand,
       readDocket: readDocketFromOpenClawCommand,
       runOnboard: runOnboardFromOpenClawCommand,
       runBuild: runBuildFromOpenClawCommand,
@@ -146,6 +150,7 @@ export async function handleChuckOpenClawCommand(
     runDoctor: deps.runDoctor ?? runDoctorFromOpenClawCommand,
     readRepoHygiene: deps.readRepoHygiene ?? readRepoHygieneFromOpenClawCommand,
     readGitHubHygiene: deps.readGitHubHygiene ?? readGitHubHygieneFromOpenClawCommand,
+    readUpstreamSync: deps.readUpstreamSync ?? readUpstreamSyncFromOpenClawCommand,
     readDocket: deps.readDocket ?? readDocketFromOpenClawCommand,
     runOnboard: deps.runOnboard ?? runOnboardFromOpenClawCommand,
     runBuild: deps.runBuild ?? runBuildFromOpenClawCommand,
@@ -172,6 +177,12 @@ export async function handleChuckOpenClawCommand(
   if (parsed.kind === "github-hygiene") {
     const report = await resolvedDeps.readGitHubHygiene({
       checkpoint: parsed.githubHygieneCheckpoint,
+    });
+    return { text: report.text };
+  }
+  if (parsed.kind === "upstream-sync") {
+    const report = await resolvedDeps.readUpstreamSync({
+      checkpoint: parsed.hygieneCheckpoint,
     });
     return { text: report.text };
   }
@@ -273,6 +284,14 @@ export function parseChuckCommandArgs(args: string | undefined): ParsedChuckComm
     const words = new Set(rest.split(/\s+/).filter(Boolean));
     const checkpoint = words.has("checkpoint") || words.has("freeze");
     return { ...baseParsed("github-hygiene"), githubHygieneCheckpoint: checkpoint };
+  }
+  if (firstToken === "upstream" || firstToken === "sync" || firstToken === "updates") {
+    const rest = raw.slice(firstToken.length).trim().toLowerCase();
+    const words = new Set(rest.split(/\s+/).filter(Boolean));
+    return {
+      ...baseParsed("upstream-sync"),
+      hygieneCheckpoint: words.has("checkpoint") || words.has("freeze"),
+    };
   }
   if (
     firstToken === "atlas" ||
@@ -629,6 +648,29 @@ export async function readGitHubHygieneFromOpenClawCommand({
   }
   const report = await inspectGitHubHygiene({ repoRoot });
   return { text: formatGitHubHygieneReport(report), report };
+}
+
+export async function readUpstreamSyncFromOpenClawCommand({
+  repoRoot = process.cwd(),
+  stateDir = CHUCK_COMMAND_STATE_DIR,
+  checkpoint = false,
+}: {
+  repoRoot?: string;
+  stateDir?: string;
+  checkpoint?: boolean;
+} = {}): Promise<{ text: string; report: unknown }> {
+  const {
+    createUpstreamSyncCheckpoint,
+    formatUpstreamSyncCheckpoint,
+    formatUpstreamSyncReport,
+    inspectUpstreamSync,
+  } = await import("./upstream-sync.js");
+  if (checkpoint) {
+    const frozen = await createUpstreamSyncCheckpoint({ repoRoot, stateDir });
+    return { text: formatUpstreamSyncCheckpoint(frozen), report: frozen };
+  }
+  const report = await inspectUpstreamSync({ repoRoot });
+  return { text: formatUpstreamSyncReport(report), report };
 }
 
 export async function runOnboardFromOpenClawCommand({
@@ -1160,6 +1202,8 @@ export function formatChuckCommandHelp(): string {
     "/chuck hygiene checkpoint — freeze repo diffs, manifests, and cleanup lanes.",
     "/chuck github — classify fork/upstream branch sprawl and cleanup gates.",
     "/chuck github checkpoint — freeze remote branch manifests and review-only deletion candidates.",
+    "/chuck upstream — show OpenClaw release drift and safe-sync gates.",
+    "/chuck upstream checkpoint — fetch tags and freeze a review-only upstream sync plan.",
     "/chuck docket — list recent Chuck decisions.",
   ].join("\n");
 }

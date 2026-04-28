@@ -36,4 +36,5 @@ export * from "./surface-atlas.js";
 export * from "./surfaces.js";
 export * from "./trace.js";
 export * from "./types.js";
+export * from "./upstream-sync.js";
 export * from "./vault-policy.js";

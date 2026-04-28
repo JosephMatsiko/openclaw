@@ -51,6 +51,8 @@ type CliOptions = {
   repoHygieneCheckpoint: boolean;
   githubHygiene: boolean;
   githubHygieneCheckpoint: boolean;
+  upstreamSync: boolean;
+  upstreamSyncCheckpoint: boolean;
   onboard: boolean;
   onboardRepair: boolean;
   onboardCandidate: boolean;
@@ -270,6 +272,44 @@ async function main(): Promise<void> {
       return;
     }
     console.log(chuckV2.formatGitHubHygieneReport(report));
+    return;
+  }
+
+  if (options.upstreamSync) {
+    if (options.upstreamSyncCheckpoint) {
+      const checkpoint = await chuckV2.createUpstreamSyncCheckpoint({
+        repoRoot: process.cwd(),
+        stateDir,
+      });
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: checkpoint.report.available,
+              text: chuckV2.formatUpstreamSyncCheckpoint(checkpoint),
+              checkpoint,
+            },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+      console.log(chuckV2.formatUpstreamSyncCheckpoint(checkpoint));
+      return;
+    }
+    const report = await chuckV2.inspectUpstreamSync({ repoRoot: process.cwd(), fetch: false });
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          { ok: report.available, text: chuckV2.formatUpstreamSyncReport(report), report },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+    console.log(chuckV2.formatUpstreamSyncReport(report));
     return;
   }
 
@@ -652,6 +692,8 @@ function parseArgs(args: string[]): CliOptions {
     repoHygieneCheckpoint: false,
     githubHygiene: false,
     githubHygieneCheckpoint: false,
+    upstreamSync: false,
+    upstreamSyncCheckpoint: false,
     onboard: false,
     onboardRepair: false,
     onboardCandidate: false,
@@ -703,6 +745,11 @@ function parseArgs(args: string[]): CliOptions {
     } else if (arg === "--github-hygiene-checkpoint" || arg === "--remote-hygiene-checkpoint") {
       options.githubHygiene = true;
       options.githubHygieneCheckpoint = true;
+    } else if (arg === "--upstream-sync" || arg === "--upstream" || arg === "--updates") {
+      options.upstreamSync = true;
+    } else if (arg === "--upstream-sync-checkpoint" || arg === "--upstream-checkpoint") {
+      options.upstreamSync = true;
+      options.upstreamSyncCheckpoint = true;
     } else if (arg === "--onboard") {
       options.onboard = true;
     } else if (arg === "--onboard-repair") {
@@ -1083,6 +1130,8 @@ function printUsage(): void {
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --repo-hygiene-checkpoint
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --github-hygiene
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --github-hygiene-checkpoint
+  node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --upstream-sync
+  node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --upstream-sync-checkpoint
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --onboard
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --onboard-prove codex/exec
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --onboard-member openai chatgpt/mac-app
@@ -1117,6 +1166,9 @@ Options:
   --github-hygiene  Classify fork branch sprawl and remote cleanup gates.
   --github-hygiene-checkpoint
                      Freeze fork/upstream branch manifests and review-only cleanup plan under Chuck state.
+  --upstream-sync   Report OpenClaw release drift and safe-sync gates.
+  --upstream-sync-checkpoint
+                     Fetch tags and freeze a review-only upstream sync plan under Chuck state.
   --onboard          Inspect complete Chuck onboarding readiness.
   --onboard-repair   Persist onboarding report and setup docket items.
   --onboard-prove <surface>

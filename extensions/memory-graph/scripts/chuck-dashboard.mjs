@@ -25,6 +25,7 @@ const ONBOARDING_DIR = join(CHUCK_V2_STATE_DIR, "onboarding");
 const RUNNER_EXECUTIONS_DIR = join(CHUCK_V2_STATE_DIR, "runner-executions");
 const REPO_HYGIENE_DIR = join(CHUCK_V2_STATE_DIR, "repo-hygiene");
 const GITHUB_HYGIENE_DIR = join(CHUCK_V2_STATE_DIR, "github-hygiene");
+const UPSTREAM_SYNC_DIR = join(CHUCK_V2_STATE_DIR, "upstream-sync");
 const SURFACE_CONTROL_DIR = join(CHUCK_V2_STATE_DIR, "surface-control");
 const SURFACE_RETURN_RECEIPTS_DIR = join(SURFACE_CONTROL_DIR, "return-receipts");
 const STUCK_SURFACE_CONTRIBUTIONS_DIR = join(CHUCK_V2_STATE_DIR, "stuck-surface-contributions");
@@ -862,6 +863,50 @@ function latestGitHubHygieneCheckpointStatus() {
   };
 }
 
+function latestUpstreamSyncCheckpointStatus() {
+  if (!existsSync(UPSTREAM_SYNC_DIR)) {
+    return { available: false, reason: "no upstream sync checkpoints yet" };
+  }
+  const dirs = safe(
+    () =>
+      readdirSync(UPSTREAM_SYNC_DIR)
+        .map((name) => {
+          const path = join(UPSTREAM_SYNC_DIR, name);
+          return { name, path, mtimeMs: safe(() => statSync(path).mtimeMs, 0) };
+        })
+        .filter((entry) => safe(() => statSync(entry.path).isDirectory(), false))
+        .toSorted((a, b) => b.mtimeMs - a.mtimeMs || b.name.localeCompare(a.name)),
+    [],
+  );
+  const latest = dirs[0];
+  if (!latest) {
+    return { available: false, reason: "no upstream sync checkpoints yet" };
+  }
+  const reportPath = join(latest.path, "report.json");
+  const remediationMarkdownPath = join(latest.path, "remediation.md");
+  const commandPlanPath = join(latest.path, "commands.review-only.sh");
+  const report = readJsonSafe(reportPath, null);
+  return {
+    available: true,
+    checkpointId: latest.name,
+    checkpointDir: latest.path,
+    updatedAt: new Date(latest.mtimeMs).toISOString(),
+    currentBranch: report?.available ? report.currentBranch : null,
+    packageVersion: report?.available ? report.packageVersion : null,
+    describe: report?.available ? report.describe : null,
+    latestStableTag: report?.available ? report.latestStableTag : null,
+    stableBehind: report?.available ? report.stableBehind : null,
+    mainBehind: report?.available ? report.mainBehind : null,
+    localDirty: report?.available ? report.localDirty : null,
+    broadSyncAllowed: report?.available ? report.broadSyncAllowed : false,
+    blockers: report?.available && Array.isArray(report.blockers) ? report.blockers : [],
+    nextActions: report?.available && Array.isArray(report.nextActions) ? report.nextActions : [],
+    reportPath,
+    remediationMarkdownPath,
+    commandPlanPath,
+  };
+}
+
 function repoHygieneBucket(path) {
   if (path.startsWith("extensions/memory-graph/src/chuck-v2/")) {
     return "chuck-v2-source";
@@ -989,6 +1034,10 @@ async function buildSnapshot() {
     available: false,
     reason: "GitHub hygiene checkpoint unavailable",
   });
+  const upstreamSyncCheckpoint = safe(latestUpstreamSyncCheckpointStatus, {
+    available: false,
+    reason: "upstream sync checkpoint unavailable",
+  });
   const curator = safe(curatorStatus, { available: false });
   const scorer = principles;
   const router = safe(fleetRouterStatus, { available: false });
@@ -1037,6 +1086,7 @@ async function buildSnapshot() {
     repoHygiene,
     repoHygieneCheckpoint,
     githubHygieneCheckpoint,
+    upstreamSyncCheckpoint,
     panels,
     curator,
     scorer,
@@ -1273,6 +1323,16 @@ async function handleGitHubHygieneCheckpoint(req, res) {
   return jsonResponse(res, run.ok ? 200 : 500, run);
 }
 
+async function handleUpstreamSyncCheckpoint(req, res) {
+  if (req.method !== "POST") {
+    return methodNotAllowed(res);
+  }
+  const run = await runChuckCli(["--upstream-sync-checkpoint", "--json"], {
+    timeoutMs: 120_000,
+  });
+  return jsonResponse(res, run.ok ? 200 : 500, run);
+}
+
 async function handleChuckOnboard(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     return methodNotAllowed(res);
@@ -1484,6 +1544,12 @@ async function handleRequest(req, res) {
     }
     if (url === "/api/github-hygiene/checkpoint") {
       return await handleGitHubHygieneCheckpoint(req, res);
+    }
+    if (url === "/api/upstream-sync/latest-checkpoint") {
+      return jsonResponse(res, 200, latestUpstreamSyncCheckpointStatus());
+    }
+    if (url === "/api/upstream-sync/checkpoint") {
+      return await handleUpstreamSyncCheckpoint(req, res);
     }
     if (url === "/api/panels") {
       const a = await safeAsync(fleetAudit, null);
@@ -1750,6 +1816,7 @@ const DASHBOARD_HTML = `<!doctype html>
       <button id="command-onboard">Onboard</button>
       <button id="command-hygiene-checkpoint">Hygiene Checkpoint</button>
       <button id="command-github-checkpoint">GitHub Checkpoint</button>
+      <button id="command-upstream-checkpoint">Upstream Checkpoint</button>
       <button id="command-doctor">Model Doctor</button>
       <button id="command-atlas">Surface Atlas</button>
       <button id="command-docket">Docket</button>
@@ -1767,6 +1834,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <section><h2 class="section">Surface Atlas</h2><div id="surface-atlas"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Repo Hygiene</h2><div id="repo-hygiene"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">GitHub Hygiene</h2><div id="github-hygiene"><div class="empty">loading…</div></div></section>
+<section><h2 class="section">Upstream Sync</h2><div id="upstream-sync"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Chuck Builder</h2><div id="builder"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Model Doctor</h2><div id="model-doctor"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Family Registry</h2><div id="family-registry"><div class="empty">loading…</div></div></section>
@@ -1806,7 +1874,7 @@ const DASHBOARD_HTML = `<!doctype html>
   const escHtml = (s) => String(s == null ? "" : s)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
-  const commandButtons = () => ["command-run", "command-build", "command-build-generate", "command-build-patch", "command-onboard", "command-hygiene-checkpoint", "command-github-checkpoint", "command-doctor", "command-atlas", "command-docket"].map($).filter(Boolean);
+  const commandButtons = () => ["command-run", "command-build", "command-build-generate", "command-build-patch", "command-onboard", "command-hygiene-checkpoint", "command-github-checkpoint", "command-upstream-checkpoint", "command-doctor", "command-atlas", "command-docket"].map($).filter(Boolean);
   const setCommandBusy = (busy) => {
     for (const btn of commandButtons()) btn.disabled = busy;
   };
@@ -2052,6 +2120,19 @@ const DASHBOARD_HTML = `<!doctype html>
     }
   }
 
+  async function runUpstreamCheckpointCommand() {
+    setCommandBusy(true, "creating upstream sync checkpoint...");
+    try {
+      const run = await fetchJsonOrThrow("/api/upstream-sync/checkpoint", { method: "POST" });
+      $("command-result").innerHTML = '<pre>' + escHtml(JSON.stringify(run.parsed ?? run, null, 2)) + '</pre>';
+      await pollSnapshot();
+      setCommandBusy(false, "upstream sync checkpoint complete");
+    } catch (err) {
+      setCommandBusy(false, "error: " + err.message);
+      $("command-result").innerHTML = '<pre>' + escHtml(err.stack || err.message) + '</pre>';
+    }
+  }
+
   async function runOnboardCommand() {
     setCommandBusy(true);
     setCommandStatus("checking Chuck onboarding readiness...", "");
@@ -2162,6 +2243,7 @@ const DASHBOARD_HTML = `<!doctype html>
   $("command-onboard").addEventListener("click", runOnboardCommand);
   $("command-hygiene-checkpoint").addEventListener("click", runHygieneCheckpointCommand);
   $("command-github-checkpoint").addEventListener("click", runGitHubCheckpointCommand);
+  $("command-upstream-checkpoint").addEventListener("click", runUpstreamCheckpointCommand);
   $("command-doctor").addEventListener("click", runDoctorCommand);
   $("command-atlas").addEventListener("click", runSurfaceAtlasCommand);
   $("command-docket").addEventListener("click", runDocketCommand);
@@ -2605,6 +2687,33 @@ const DASHBOARD_HTML = `<!doctype html>
       '<div class="receipt-grid">' + (categories || '<div class="empty">no branch categories</div>') + '</div>';
   }
 
+  function renderUpstreamSync(checkpoint) {
+    const root = $("upstream-sync");
+    if (!checkpoint?.available) {
+      root.innerHTML = '<div class="empty">' + escHtml(checkpoint?.reason ?? "upstream sync checkpoint unavailable") + '</div>';
+      return;
+    }
+    const summary = [
+      metric("checkpoint", checkpoint.checkpointId),
+      metric("package", checkpoint.packageVersion || "unknown"),
+      metric("branch", checkpoint.currentBranch || "unknown"),
+      metric("latest stable", checkpoint.latestStableTag || "unknown"),
+      metric("stable drift", checkpoint.stableBehind ? "behind/different" : "current"),
+      metric("local dirt", checkpoint.localDirty ? "yes" : "no"),
+      metric("broad sync", checkpoint.broadSyncAllowed ? "allowed" : "blocked"),
+    ].join("");
+    const blockers = (checkpoint.blockers || []).map((item) => '<li><span class="slug">' + escHtml(item) + '</span><span class="w">gate</span></li>').join("");
+    const next = (checkpoint.nextActions || []).map((item) => '<li><span class="slug">' + escHtml(item) + '</span><span class="w">next</span></li>').join("");
+    root.innerHTML = '<div class="run-summary">' + summary + '</div>' +
+      '<div class="card" style="margin-bottom:10px;"><div class="col-title">Review Artifacts</div><div class="run-summary">' + [
+        metric("report", checkpoint.reportPath),
+        metric("remediation", checkpoint.remediationMarkdownPath),
+        metric("commands", checkpoint.commandPlanPath),
+      ].join("") + '</div></div>' +
+      (blockers ? '<div class="card" style="margin-bottom:10px;"><div class="col-title">Sync Gates</div><ul class="princ">' + blockers + '</ul></div>' : '') +
+      '<div class="card"><div class="col-title">Next</div><ul class="princ">' + (next || '<li><span class="slug">no upstream sync action needed</span><span class="w">ok</span></li>') + '</ul></div>';
+  }
+
   function renderModelDoctor(d) {
     const root = $("model-doctor");
     if (!d?.available) {
@@ -2727,6 +2836,7 @@ const DASHBOARD_HTML = `<!doctype html>
       renderSurfaceAtlas(snap.surfaceAtlas);
       renderRepoHygiene(snap.repoHygiene, snap.repoHygieneCheckpoint);
       renderGitHubHygiene(snap.githubHygieneCheckpoint);
+      renderUpstreamSync(snap.upstreamSyncCheckpoint);
       renderModelDoctor(snap.modelDoctor);
       renderFamilyRegistry(snap.familyRegistry);
       renderPanels(snap.panels);

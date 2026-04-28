@@ -75,6 +75,7 @@ import {
   formatGitHubHygieneReport,
   formatRepoHygieneReport,
   formatSurfaceAtlasReport,
+  formatUpstreamSyncReport,
   gradeEfficiencyTrace,
   handleChuckOpenClawCommand,
   evaluateKernelAdjudication,
@@ -4153,6 +4154,14 @@ describe("Chuck V2 OpenClaw command bridge", () => {
       kind: "github-hygiene",
       githubHygieneCheckpoint: true,
     });
+    expect(parseChuckCommandArgs("upstream")).toMatchObject({
+      kind: "upstream-sync",
+      hygieneCheckpoint: false,
+    });
+    expect(parseChuckCommandArgs("upstream checkpoint")).toMatchObject({
+      kind: "upstream-sync",
+      hygieneCheckpoint: true,
+    });
     expect(parseChuckCommandArgs("atlas perplexity/mac-app")).toMatchObject({
       kind: "surface-atlas",
       surfaceAtlasSurface: "perplexity/mac-app",
@@ -4866,6 +4875,47 @@ describe("Chuck V2 GitHub hygiene", () => {
     expect(text).toContain("Delete candidates: 1");
     expect(text).toContain("require explicit manifest review");
     expect(text).not.toContain("git push");
+  });
+});
+
+describe("Chuck V2 upstream sync", () => {
+  test("formats release drift without allowing dirty broad sync", () => {
+    const text = formatUpstreamSyncReport({
+      available: true,
+      currentBranch: "phase-1/sandbox-broker",
+      packageVersion: "2026.4.20",
+      headSha: "local",
+      headSummary: "local 2026-04-28T00:00:00Z local work",
+      describe: "v2026.4.19-beta.2-866-glocal-dirty",
+      upstreamRemote: "origin",
+      latestStableTag: "v2026.4.26",
+      latestStableSha: "stable",
+      upstreamMainSha: "main",
+      stableBehind: true,
+      mainBehind: true,
+      localDirty: true,
+      broadSyncAllowed: false,
+      blockers: ["192 local dirty path(s) must be checkpointed, committed, or parked first"],
+      nextActions: ["finish repo lane cleanup or commit the current lane checkpoints"],
+      policy: ["watch upstream continuously, but do not merge/rebase over dirty Chuck lanes"],
+      repoHygiene: {
+        available: true,
+        clean: false,
+        total: 192,
+        trackedModified: 27,
+        untracked: 165,
+        selfBuildSafe: false,
+        entries: [],
+        buckets: [],
+        blockers: [],
+        nextActions: [],
+        policy: [],
+      },
+    });
+
+    expect(text).toContain("Latest stable tag: v2026.4.26");
+    expect(text).toContain("Broad sync allowed: no");
+    expect(text).toContain("local dirty path");
   });
 });
 
