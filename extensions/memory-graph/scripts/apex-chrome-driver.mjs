@@ -153,8 +153,32 @@ function wrap(backend, handle, opts = {}) {
 // reorder Chrome windows or close tabs (each findOrOpenTab raises its
 // window to front, shifting indices of others). When an op hits the
 // AppleScript -1719 "Invalid index" / "Can't get tab N of window 1"
-// error, refresh the tab's target by URL match and retry once.
+// error, refresh the tab's target by URL match and retry. Single retry
+// proved insufficient under 5-voice parallel dispatch — the refresh
+// itself raises a window which can re-stale a sibling voice's handle
+// it just refreshed. Fix: serialize all Chrome AppleScript ops within
+// this process via an in-process mutex AND retry up to 3 times.
 const STALE_HANDLE_RX = /-1719|Invalid index|Can.t get tab|Can.t get window/i;
+const MAX_REFRESH_RETRIES = 3;
+
+let chromeAppleScriptLock = Promise.resolve();
+async function withChromeAppleScriptLock(fn) {
+  const prior = chromeAppleScriptLock;
+  let release;
+  chromeAppleScriptLock = new Promise((r) => {
+    release = r;
+  });
+  try {
+    await prior;
+  } catch {
+    /* prior chain may reject; we still proceed */
+  }
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
 
 async function refreshAppleScriptTab(tab) {
   if (tab?._backend !== "applescript" || !tab.urlMatch) {
@@ -184,6 +208,17 @@ function isStaleHandleError(result) {
   return STALE_HANDLE_RX.test(String(result.error ?? ""));
 }
 
+async function evalInTabWithRetry(tab, code) {
+  return await withChromeAppleScriptLock(async () => {
+    let r = await applescript.evalInTab(tab.handle.target, code);
+    for (let attempt = 0; attempt < MAX_REFRESH_RETRIES && isStaleHandleError(r); attempt++) {
+      await refreshAppleScriptTab(tab);
+      r = await applescript.evalInTab(tab.handle.target, code);
+    }
+    return r;
+  });
+}
+
 // ---- Unified API (matches apex-chrome-lib + adds absorbed UI) ---------
 
 export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
@@ -192,7 +227,11 @@ export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
     const handle = await cdp.findOrOpenTab({ urlMatch, createUrl });
     return wrap("cdp", handle, { urlMatch });
   }
-  const handle = await applescript.findOrOpenTab({ urlMatch, createUrl });
+  // Serialize: parallel voices each calling findOrOpenTab without a lock
+  // reorder windows mid-call, which is the root cause of the -1719 race.
+  const handle = await withChromeAppleScriptLock(async () =>
+    await applescript.findOrOpenTab({ urlMatch, createUrl }),
+  );
   return wrap("applescript", handle, { urlMatch });
 }
 
@@ -201,12 +240,7 @@ export async function evalInTab(tab, code) {
     return await cdp.evalInTab(tab.handle, code);
   }
   if (tab?._backend === "applescript") {
-    let r = await applescript.evalInTab(tab.handle.target, code);
-    if (isStaleHandleError(r)) {
-      await refreshAppleScriptTab(tab);
-      r = await applescript.evalInTab(tab.handle.target, code);
-    }
-    return r;
+    return await evalInTabWithRetry(tab, code);
   }
   throw new Error("evalInTab: tab missing _backend tag — was it created via findOrOpenTab?");
 }
@@ -216,11 +250,27 @@ export async function waitForPageReady(tab, opts = {}) {
     return await cdp.waitForPageReady(tab.handle, opts);
   }
   if (tab?._backend === "applescript") {
-    // Refresh once before the wait loop since the tab handle may already
-    // be stale from a prior parallel-voice op. The lib's loop polls
-    // evalInTab internally; one refresh up front covers most races.
-    await refreshAppleScriptTab(tab);
-    return await applescript.waitForPageReady(tab.handle.target, opts);
+    // Don't hold the lock for the full wait duration — that blocks
+    // sibling voices for 15-30s. Instead, do our own ready-poll using
+    // the locked evalInTabWithRetry so each readyState check is
+    // race-safe but the loop releases the lock between ticks.
+    const { timeoutMs = 15000, urlIncludes } = opts ?? {};
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const r = await evalInTabWithRetry(
+        tab,
+        `return { ready: document.readyState, url: location.href };`,
+      );
+      if (r.ok) {
+        const v = r.value ?? {};
+        const urlOk = urlIncludes ? String(v.url ?? "").includes(urlIncludes) : true;
+        if (v.ready === "complete" && urlOk) {
+          return true;
+        }
+      }
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    return false;
   }
   throw new Error("waitForPageReady: missing _backend tag");
 }
@@ -240,10 +290,11 @@ export async function pollUntilStable({ tab, read, ...rest } = {}) {
     return await applescript.pollUntilStable({
       target: tab.handle.target,
       read: async (_t) => {
-        // Ignore the per-iteration target; refresh the original tab and
-        // pass it forward. This way the read callback's evalInTab calls
-        // hit the freshly-resolved target each tick.
-        await refreshAppleScriptTab(tab);
+        // Pass the original wrapped tab forward. Its evalInTab calls
+        // through the locked evalInTabWithRetry pattern, which auto-
+        // refreshes on stale-handle errors. Pre-emptive refresh on
+        // every tick was tested 2026-04-28 and caused window-raise
+        // thrashing; rely on retry-on-error instead.
         return await read(tab);
       },
       ...rest,
@@ -274,12 +325,7 @@ export async function insertText(tab, text) {
       }
       return { ok: false, error: "insertion failed" };
     `;
-    let r = await applescript.evalInTab(tab.handle.target, code);
-    if (isStaleHandleError(r)) {
-      await refreshAppleScriptTab(tab);
-      r = await applescript.evalInTab(tab.handle.target, code);
-    }
-    return r;
+    return await evalInTabWithRetry(tab, code);
   }
   throw new Error("insertText: missing _backend tag");
 }

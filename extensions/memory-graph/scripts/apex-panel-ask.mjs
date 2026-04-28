@@ -8,7 +8,7 @@
 // prompt through the same channels, and the replies should land in
 // consistent filenames so downstream diffing and synthesis are trivial.
 //
-// Voices driven (in parallel) — 10-voice panel as of 2026-04-28:
+// Voices driven (in parallel) — 11-voice panel as of 2026-04-28:
 //   Anthropic family
 //     - claude-cli      : Opus 4.7 via `claude -p --model opus` (Max sub)
 //     - claude-ai       : Opus 4.7 Adaptive via claude.ai web chat
@@ -24,6 +24,7 @@
 //     - grok-web        : Grok via grok.com web chat
 //   Perplexity family
 //     - perplexity-web  : Perplexity Pro via perplexity.ai web chat
+//     - perplexity-mac  : Perplexity Pro via Perplexity.app native (incognito)
 //
 // Usage:
 //   apex-panel-ask.mjs --file <path>              Prompt-body from file
@@ -188,6 +189,14 @@ const VOICES = {
     modelName: "perplexity.ai/pro",
     run: runPerplexityChat,
   },
+  // Perplexity.app native macOS client (therivendellcenter Max seat).
+  // Native incognito + Pro Search; the only path that keeps Joseph's
+  // primary perplexity.ai web identity isolated from research threads.
+  "perplexity-mac": {
+    label: "Perplexity-Mac",
+    modelName: "perplexity-mac-app/research",
+    run: runPerplexityMac,
+  },
 };
 
 function parseArgs(argv) {
@@ -328,6 +337,12 @@ async function runGrokChat(prompt) {
 async function runPerplexityChat(prompt) {
   const mod = await import("./research-perplexity-chat.mjs");
   const r = await mod.askPerplexityChat({ prompt });
+  return r;
+}
+
+async function runPerplexityMac(prompt) {
+  const mod = await import("./research-perplexity-mac.mjs");
+  const r = await mod.askPerplexityMac({ prompt });
   return r;
 }
 
