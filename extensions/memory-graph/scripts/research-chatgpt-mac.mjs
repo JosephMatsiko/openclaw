@@ -598,7 +598,21 @@ export async function askChatGPTMac({
     if (thinkingMode) {
       await toggleThinkingMode();
     }
-    await clickAnchorOrFallback("composer", COORDS.composerCenter);
+    // After newConversation() (Cmd+N) the composer is auto-focused.
+    // Earlier the explicit clickAnchorOrFallback at COORDS.composerCenter
+    // moved focus to wherever the (fallback-coord) click landed —
+    // typically NOT inside the input element under WebKit, so Cmd+V
+    // pasted into nothing and Return sent nothing. Skip the click and
+    // trust the Cmd+N focus. If empirically the focus is lost (e.g., a
+    // standardizeWindow raise pulls it), a real AX anchor point below
+    // re-asserts it without falling back to a guessed coordinate.
+    const composerAnchor = await findUiAnchor("composer").catch(() => null);
+    if (composerAnchor?.point) {
+      process.stderr.write(
+        `[chatgpt-mac] composer anchor score=${composerAnchor.score} point=${composerAnchor.point.join(",")} role=${composerAnchor.role.slice(0, 80)}\n`,
+      );
+      await clickAt(composerAnchor.point);
+    }
     const fullPrompt =
       PROMPT_PREFIX +
       (thinkingMode ? "Please use thinking/reasoning mode for the best quality answer.\n\n" : "") +
