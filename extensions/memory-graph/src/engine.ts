@@ -7,7 +7,7 @@ import type {
 } from "openclaw/plugin-sdk";
 import { delegateCompactionToRuntime } from "openclaw/plugin-sdk";
 import { lastAssistantText, lastUserText } from "./messages.js";
-import { buildMemoryBlock, persistTurn } from "./pipeline.js";
+import { buildMemoryBlock, buildPrincipleBlock, persistTurn } from "./pipeline.js";
 import type { GraphStorage } from "./storage.js";
 import type { GraphScope } from "./types.js";
 
@@ -79,18 +79,49 @@ export class MemoryGraphContextEngine implements ContextEngine {
       this.warnMissingStorageOnce("assemble");
       return { messages: params.messages, estimatedTokens: 0 };
     }
-    const result = await buildMemoryBlock({
-      storage: this.storage,
-      scope: this.scope,
-      scopeId: this.scopeId,
-    });
-    if (!result.block) {
+    // Two blocks, in the same order the universal promptBuilder hook emits
+    // them (index.ts): <principle-layer> first as authoritative constraints,
+    // then <user-memory> as background context. Each block is independently
+    // fail-closed — a failure in one does not suppress the other.
+    const blocks: string[] = [];
+    let estimatedTokens = 0;
+    try {
+      const principles = await buildPrincipleBlock({
+        storage: this.storage,
+        scope: this.scope,
+        scopeId: this.scopeId,
+      });
+      if (principles.block) {
+        blocks.push(principles.block);
+        estimatedTokens += principles.estimatedTokens;
+      }
+    } catch (err) {
+      this.logger?.warn(
+        `memory-graph: assemble principle block failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const memory = await buildMemoryBlock({
+        storage: this.storage,
+        scope: this.scope,
+        scopeId: this.scopeId,
+      });
+      if (memory.block) {
+        blocks.push(memory.block);
+        estimatedTokens += memory.estimatedTokens;
+      }
+    } catch (err) {
+      this.logger?.warn(
+        `memory-graph: assemble memory block failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (blocks.length === 0) {
       return { messages: params.messages, estimatedTokens: 0 };
     }
     return {
       messages: params.messages,
-      estimatedTokens: result.estimatedTokens,
-      systemPromptAddition: result.block,
+      estimatedTokens,
+      systemPromptAddition: blocks.join("\n\n"),
     };
   }
 

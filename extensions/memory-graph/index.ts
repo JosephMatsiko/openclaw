@@ -1,13 +1,21 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { registerContextEngine } from "openclaw/plugin-sdk";
 import { onSessionTranscriptUpdate } from "openclaw/plugin-sdk/agent-harness";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { createChuckOpenClawCommand } from "./src/chuck-v2/openclaw-command.js";
 import { resolveMemoryGraphConfig } from "./src/config.js";
 import { MemoryGraphContextEngine } from "./src/engine.js";
 import { runExecutionGate } from "./src/execution-gate.js";
-import { buildMemoryBlockSync, persistTurnFromMessages } from "./src/pipeline.js";
+import {
+  buildMemoryBlockSync,
+  buildPrincipleBlockSync,
+  persistTurnFromMessages,
+} from "./src/pipeline.js";
 import { runRoutingHook } from "./src/routing-hook.js";
 import { SqliteGraphStorage } from "./src/sqlite-storage.js";
+
+export * from "./src/chuck-v2/index.js";
 
 function resolveScopeId(config: ReturnType<typeof resolveMemoryGraphConfig>): string {
   return config.scope === "agent" ? "main" : "default";
@@ -54,6 +62,14 @@ export default definePluginEntry({
     const config = resolveMemoryGraphConfig(api.pluginConfig);
     const scopeId = resolveScopeId(config);
 
+    api.registerCommand(
+      createChuckOpenClawCommand({
+        stateDir: api.runtime.state.resolveStateDir
+          ? join(api.runtime.state.resolveStateDir(), "chuck-v2")
+          : undefined,
+      }),
+    );
+
     let storage: SqliteGraphStorage | undefined;
     try {
       storage = new SqliteGraphStorage({ dbPath: config.dbPath });
@@ -85,21 +101,47 @@ export default definePluginEntry({
     //    This fires during system-prompt assembly for ALL provider backends
     //    (embedded AND CLI), so claude-cli turns get the graph memory block
     //    in their `--append-system-prompt` payload.
+    //
+    //    Two blocks emitted, in order:
+    //      (a) <principle-layer> — canonical one-line architectural rules
+    //          from `[principle:<slug>]` entities. Authoritative framing.
+    //      (b) <user-memory>     — recency-ranked background context from
+    //          fact/preference/constraint/open-loop/entity nodes, with
+    //          canonical principle entities excluded to avoid duplication.
+    //    Each block is independently fail-closed: a failure in one does not
+    //    suppress the other.
     api.registerMemoryCapability({
       promptBuilder: (_params) => {
+        const blocks: string[] = [];
         try {
-          const result = buildMemoryBlockSync({
+          const principles = buildPrincipleBlockSync({
             storage: store,
             scope: config.scope,
             scopeId,
           });
-          return result.block ? [result.block] : [];
+          if (principles.block) {
+            blocks.push(principles.block);
+          }
         } catch (err) {
           api.logger.warn(
-            `memory-graph: promptBuilder failed: ${err instanceof Error ? err.message : String(err)}`,
+            `memory-graph: principle promptBuilder failed: ${err instanceof Error ? err.message : String(err)}`,
           );
-          return [];
         }
+        try {
+          const memory = buildMemoryBlockSync({
+            storage: store,
+            scope: config.scope,
+            scopeId,
+          });
+          if (memory.block) {
+            blocks.push(memory.block);
+          }
+        } catch (err) {
+          api.logger.warn(
+            `memory-graph: memory promptBuilder failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        return blocks;
       },
     });
 

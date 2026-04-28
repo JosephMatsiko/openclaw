@@ -205,6 +205,51 @@ describe("MemoryGraphContextEngine afterTurn", () => {
     await engine.dispose();
   });
 
+  test("assemble emits <principle-layer> before <user-memory> when both exist", async () => {
+    const storage = new SqliteGraphStorage({ dbPath: ":memory:" });
+    const engine = new MemoryGraphContextEngine({
+      storage,
+      scope: "workspace",
+      scopeId: "ws-1",
+    });
+    // Seed a canonical principle directly (extractClaims won't produce one).
+    await storage.writeNode({
+      id: "entity-principle-seed",
+      kind: "entity",
+      summary: "[principle:sovereignty-hardening] Never compromise the sovereign boundary.",
+      scope: "workspace",
+      scopeId: "ws-1",
+      confidence: 1,
+    });
+    // Seed a plain memory claim via a real turn.
+    await engine.afterTurn({
+      sessionId: "sess-A",
+      sessionFile: "/tmp/a.jsonl",
+      messages: makeTurn(
+        "Please remember that I'm allergic to peanuts.",
+        "Got it — noted.",
+      ) as never,
+      prePromptMessageCount: 0,
+    });
+    const result = await engine.assemble({
+      sessionId: "sess-B",
+      messages: [],
+      prompt: "anything",
+    });
+    const addition = result.systemPromptAddition!;
+    expect(addition).toBeDefined();
+    const principleIdx = addition.indexOf("<principle-layer>");
+    const memoryIdx = addition.indexOf("<user-memory>");
+    expect(principleIdx).toBeGreaterThanOrEqual(0);
+    expect(memoryIdx).toBeGreaterThan(principleIdx);
+    expect(addition).toContain("sovereignty-hardening");
+    expect(addition.toLowerCase()).toContain("allergic to peanuts");
+    // Principle entity must not also appear inside <user-memory>.
+    const memorySection = addition.slice(memoryIdx);
+    expect(memorySection).not.toContain("sovereignty-hardening");
+    await engine.dispose();
+  });
+
   test("only stores the new slice when prePromptMessageCount > 0", async () => {
     const storage = new SqliteGraphStorage({ dbPath: ":memory:" });
     const engine = new MemoryGraphContextEngine({

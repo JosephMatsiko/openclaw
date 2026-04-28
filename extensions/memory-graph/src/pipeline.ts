@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { estimateTokens, formatMemoryBlock, MEMORY_INJECTION_KINDS } from "./assemble.js";
+import {
+  estimateTokens,
+  formatMemoryBlock,
+  formatPrincipleBlock,
+  isCanonicalPrincipleNode,
+  MEMORY_INJECTION_KINDS,
+} from "./assemble.js";
 import { extractClaims } from "./extractor.js";
 import { lastAssistantText, lastUserText } from "./messages.js";
 import type { SqliteGraphStorage } from "./sqlite-storage.js";
@@ -131,7 +137,8 @@ export type MemoryBlockResult = {
 
 // Query storage for high-signal nodes and format them into a <user-memory>
 // block ready for prompt injection. Returns an empty result when the graph
-// has nothing to inject.
+// has nothing to inject. Canonical principle entities are filtered out —
+// they surface through buildPrincipleBlock in a dedicated <principle-layer>.
 export async function buildMemoryBlock(
   args: PipelineScope & { storage: GraphStorage; limit?: number },
 ): Promise<MemoryBlockResult> {
@@ -141,7 +148,26 @@ export async function buildMemoryBlock(
     kinds: [...MEMORY_INJECTION_KINDS],
     limit: args.limit ?? 50,
   });
-  const block = formatMemoryBlock(nodes);
+  const nonPrinciple = nodes.filter((n) => !isCanonicalPrincipleNode(n));
+  const block = formatMemoryBlock(nonPrinciple);
+  if (!block) {
+    return { estimatedTokens: 0 };
+  }
+  return { block, estimatedTokens: estimateTokens(block) };
+}
+
+// Async counterpart to buildPrincipleBlockSync, for callers that hold only
+// the generic GraphStorage interface (ContextEngine.assemble path).
+export async function buildPrincipleBlock(
+  args: PipelineScope & { storage: GraphStorage; limit?: number },
+): Promise<MemoryBlockResult> {
+  const nodes = await args.storage.findNodes({
+    scope: args.scope,
+    scopeId: args.scopeId,
+    kinds: ["entity"],
+    limit: args.limit ?? 50,
+  });
+  const block = formatPrincipleBlock(nodes);
   if (!block) {
     return { estimatedTokens: 0 };
   }
@@ -160,7 +186,31 @@ export function buildMemoryBlockSync(
     kinds: [...MEMORY_INJECTION_KINDS],
     limit: args.limit ?? 50,
   });
-  const block = formatMemoryBlock(nodes);
+  // Filter out canonical principle entities — they surface through
+  // buildPrincipleBlockSync in a dedicated <principle-layer> block with
+  // authoritative framing. Leaving them here would dilute both signals.
+  const nonPrinciple = nodes.filter((n) => !isCanonicalPrincipleNode(n));
+  const block = formatMemoryBlock(nonPrinciple);
+  if (!block) {
+    return { estimatedTokens: 0 };
+  }
+  return { block, estimatedTokens: estimateTokens(block) };
+}
+
+// Query storage for canonical principle entities and format them into a
+// <principle-layer> block ready for prompt injection. Cheap: principles
+// are a small closed set (target ~15 total); we pull all entity-kind nodes
+// and let formatPrincipleBlock filter to canonical ones.
+export function buildPrincipleBlockSync(
+  args: PipelineScope & { storage: SqliteGraphStorage; limit?: number },
+): MemoryBlockResult {
+  const nodes: GraphNode[] = args.storage.findNodesSync({
+    scope: args.scope,
+    scopeId: args.scopeId,
+    kinds: ["entity"],
+    limit: args.limit ?? 50,
+  });
+  const block = formatPrincipleBlock(nodes);
   if (!block) {
     return { estimatedTokens: 0 };
   }
