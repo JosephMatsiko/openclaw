@@ -60,7 +60,15 @@ export function runAppleScript(script, { timeoutMs = 25000 } = {}) {
 
 // Find a tab whose URL contains `urlMatch`. If none, create a new tab
 // navigating to `createUrl` (falls back to `urlMatch` when `createUrl`
-// is omitted). Returns { winIdx, tabIdx, target, created }.
+// is omitted). Returns { winIdx, tabIdx, winId, target, created }.
+//
+// IMPORTANT: target uses `window id N` (Chrome AppleScript's stable
+// window-id reference) rather than `window N` (positional index).
+// Positional indexes shift when sibling voices in a parallel panel
+// raise their own windows to front, which silently re-points handles
+// at the wrong window. Window IDs are immutable for the life of the
+// window, so once captured, the target stays valid even when the
+// window is reordered or backgrounded.
 export async function findOrOpenTab({ urlMatch, createUrl } = {}) {
   if (!urlMatch) {
     throw new Error("findOrOpenTab: urlMatch required");
@@ -74,7 +82,8 @@ tell application "Google Chrome"
       set t to item tIdx of tabs_
       try
         if URL of t contains "${escAS(urlMatch)}" then
-          set out to (wIdx as string) & "," & (tIdx as string)
+          set wId to id of window wIdx
+          set out to (wIdx as string) & "," & (tIdx as string) & "," & (wId as string)
           exit repeat
         end if
       end try
@@ -86,33 +95,49 @@ return out
 `;
   const find = await runAppleScript(findScript);
   if (find.ok && find.stdout) {
-    const [w, t] = find.stdout.split(",").map(Number);
+    const [w, t, winId] = find.stdout.split(",").map(Number);
+    // Activate Chrome but DON'T re-set window index — that's what causes
+    // the index-shift race on parallel voices. The tab is addressed by
+    // window id below, so it doesn't need to be at position 1.
     await runAppleScript(`
 tell application "Google Chrome"
   activate
-  set index of window ${w} to 1
-  set active tab index of window ${w} to ${t}
+  set active tab index of window id ${winId} to ${t}
 end tell
 `);
-    return { winIdx: w, tabIdx: t, target: `tab ${t} of window ${w}`, created: false };
+    return {
+      winIdx: w,
+      tabIdx: t,
+      winId,
+      target: `tab ${t} of window id ${winId}`,
+      created: false,
+    };
   }
   const url = createUrl ?? `https://${urlMatch}/`;
   const newTabScript = `
 tell application "Google Chrome"
   activate
   if (count windows) = 0 then make new window
-  set newTab to make new tab at end of tabs of front window with properties {URL:"${escAS(url)}"}
-  set activeIdx to count tabs of front window
-  set active tab index of front window to activeIdx
-  return "1," & (activeIdx as string)
+  set frontWin to front window
+  set newTab to make new tab at end of tabs of frontWin with properties {URL:"${escAS(url)}"}
+  set activeIdx to count tabs of frontWin
+  set active tab index of frontWin to activeIdx
+  set wId to id of frontWin
+  return (1 as string) & "," & (activeIdx as string) & "," & (wId as string)
 end tell
 `;
   const created = await runAppleScript(newTabScript);
   if (!created.ok) {
     throw new Error(`findOrOpenTab: could not open tab at ${url}: ${created.stderr.slice(0, 200)}`);
   }
-  const [w, t] = created.stdout.split(",").map(Number);
-  return { winIdx: w, tabIdx: t, target: `tab ${t} of window ${w}`, created: true };
+  const [w, t, winId] = created.stdout.split(",").map(Number);
+  return {
+    winIdx: w,
+    tabIdx: t,
+    winId,
+    target: `tab ${t} of window id ${winId}`,
+    created: true,
+  };
 }
 
 // Execute `code` as a JS function body in `target`. Wraps in a JSON
