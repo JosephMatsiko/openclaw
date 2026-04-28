@@ -46,7 +46,29 @@ async function waitComposerReady(tab, { timeoutMs = 15000 } = {}) {
   return { ok: false, reason: "timeout" };
 }
 
+async function dismissCookieConsent(tab) {
+  const r = await evalInTab(
+    tab,
+    `
+    var labels = [/reject all/i, /confirm my choices/i, /save choices/i, /accept necessary/i];
+    var elements = Array.from(document.querySelectorAll('button,a,[role="button"]'));
+    var target = elements.find(function(el) {
+      var text = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim();
+      return labels.some(function(rx) { return rx.test(text); });
+    });
+    if (!target) return { clicked: false };
+    target.click();
+    return { clicked: true, label: (target.innerText || target.textContent || target.getAttribute('aria-label') || '').trim() };
+  `,
+  );
+  if (r.ok && r.value?.clicked) {
+    await new Promise((res) => setTimeout(res, 800));
+  }
+  return r.value ?? { clicked: false };
+}
+
 async function submitPrompt(tab, prompt) {
+  await dismissCookieConsent(tab);
   const insert = await evalInTab(
     tab,
     `
@@ -60,7 +82,9 @@ async function submitPrompt(tab, prompt) {
       var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       if (setter) setter.call(c, ${JSON.stringify(prompt)});
       else c.value = ${JSON.stringify(prompt)};
+      c.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
       c.dispatchEvent(new Event('input', { bubbles: true }));
+      c.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(prompt.slice(-1) || " ")} }));
       // Grok's React guard on Submit requires a keyup event; 'input'
       // alone leaves the button stuck in disabled state even though the
       // controlled-value path registered. Proven empirically 2026-04-23.
@@ -85,6 +109,7 @@ async function submitPrompt(tab, prompt) {
   for (let attempt = 0; attempt < 3 && !clicked; attempt++) {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 1000));
+      await dismissCookieConsent(tab);
     }
     const send = await evalInTab(
       tab,
