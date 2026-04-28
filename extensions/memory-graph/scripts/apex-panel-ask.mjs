@@ -8,11 +8,22 @@
 // prompt through the same channels, and the replies should land in
 // consistent filenames so downstream diffing and synthesis are trivial.
 //
-// Voices driven (in parallel):
-//   - claude-cli  : Opus 4.7 via `claude -p --model opus` (Max subscription)
-//   - chatgpt-web : GPT-5.5 (Instant/Thinking) via chatgpt.com web chat
-//   - claude-ai   : Opus 4.7 Adaptive via claude.ai web chat
-//   - gemini-cli  : Gemini 3.1 Pro via `gemini` CLI (AI Pro, optional)
+// Voices driven (in parallel) — 10-voice panel as of 2026-04-28:
+//   Anthropic family
+//     - claude-cli      : Opus 4.7 via `claude -p --model opus` (Max sub)
+//     - claude-ai       : Opus 4.7 Adaptive via claude.ai web chat
+//   OpenAI family
+//     - chatgpt-web     : GPT-5.5 via chatgpt.com web chat
+//     - chatgpt-mac     : GPT-5.5 via ChatGPT.app native macOS app
+//     - codex           : codex/gpt-5.5 via Codex CLI (repo-grounded)
+//   Google family
+//     - gemini-cli      : Gemini 3.1 Pro via `gemini` CLI (AI Pro)
+//     - gemini-web      : Gemini 3.1 Pro via gemini.google.com web chat
+//     - aistudio-web    : Gemini Pro variants via aistudio.google.com
+//   xAI family
+//     - grok-web        : Grok via grok.com web chat
+//   Perplexity family
+//     - perplexity-web  : Perplexity Pro via perplexity.ai web chat
 //
 // Usage:
 //   apex-panel-ask.mjs --file <path>              Prompt-body from file
@@ -133,6 +144,50 @@ const VOICES = {
     modelName: "codex/gpt-5.5",
     run: runCodexCli,
   },
+  // ChatGPT.app native Mac client. Added 2026-04-28 as part of the
+  // web-wrapper bridging that doubled panel coverage from 5→10. The
+  // native app is the only path that can attach files / accept image
+  // uploads at the OpenAI surface; web tab is text-only via osascript.
+  "chatgpt-mac": {
+    label: "ChatGPT-Mac",
+    modelName: "chatgpt-mac-app/gpt-5.5",
+    run: runChatGPTMac,
+  },
+  // Gemini 3.1 Pro via the gemini.google.com web chat. Distinct from
+  // gemini-cli (CLI / quota-bound) — web chat runs unmetered inside
+  // the AI Pro subscription. Independent prior from aistudio-web; both
+  // are Google but different surfaces with different model variants.
+  "gemini-web": {
+    label: "Gemini-Web",
+    modelName: "gemini.google.com/3.1-pro",
+    run: runGeminiWebChat,
+  },
+  // Google AI Studio (aistudio.google.com). Same Gemini model family
+  // but ships variants and reasoning-mode toggles ahead of the public
+  // gemini.google.com surface — useful as a separate witness within
+  // the Google family.
+  "aistudio-web": {
+    label: "AIStudio-Web",
+    modelName: "aistudio.google.com/gemini-pro",
+    run: runAiStudioChat,
+  },
+  // Grok via grok.com. xAI family — its own prior. Driver lives in
+  // research-grok-chat.mjs; CDP-on-main-Chrome path. (Note: prior
+  // CDP driver had session-loss issues on Apex Chrome; main Chrome
+  // is the working path until rebuild.)
+  "grok-web": {
+    label: "Grok-Web",
+    modelName: "grok.com/grok",
+    run: runGrokChat,
+  },
+  // Perplexity Pro via perplexity.ai web. Distinct from perplexity-mac
+  // (native app; therivendellcenter seat). Best-in-class at grounded
+  // citations + recency for current-events questions.
+  "perplexity-web": {
+    label: "Perplexity-Web",
+    modelName: "perplexity.ai/pro",
+    run: runPerplexityChat,
+  },
 };
 
 function parseArgs(argv) {
@@ -243,6 +298,36 @@ async function runChatGPTChat(prompt) {
 async function runClaudeAiChat(prompt) {
   const mod = await import("./research-claude-ai-chat.mjs");
   const r = await mod.askClaudeAiChat({ prompt });
+  return r;
+}
+
+async function runChatGPTMac(prompt) {
+  const mod = await import("./research-chatgpt-mac.mjs");
+  const r = await mod.askChatGPTMac({ prompt });
+  return r;
+}
+
+async function runGeminiWebChat(prompt) {
+  const mod = await import("./research-gemini-chat.mjs");
+  const r = await mod.askGeminiChat({ prompt });
+  return r;
+}
+
+async function runAiStudioChat(prompt) {
+  const mod = await import("./research-aistudio-chat.mjs");
+  const r = await mod.askAiStudioChat({ prompt });
+  return r;
+}
+
+async function runGrokChat(prompt) {
+  const mod = await import("./research-grok-chat.mjs");
+  const r = await mod.askGrokChat({ prompt });
+  return r;
+}
+
+async function runPerplexityChat(prompt) {
+  const mod = await import("./research-perplexity-chat.mjs");
+  const r = await mod.askPerplexityChat({ prompt });
   return r;
 }
 
