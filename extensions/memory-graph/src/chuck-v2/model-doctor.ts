@@ -220,11 +220,11 @@ const DEFAULT_SETUP_GUIDES: SurfaceSetupGuide[] = [
     setupAction:
       "Confirm Perplexity Max Mac app is logged in and its app protocol/driver selectors still work.",
     windowPolicy:
-      "Prefer the app if it is stable; keep shared-account work in Incognito session leases instead of closing threads arbitrarily.",
+      "Prefer the app if it is stable; the Mac app uses the shared Max profile, so keep work in Incognito session leases instead of closing threads arbitrarily.",
     notes: [
       "No PAYG Perplexity API key in the core path.",
       "Strongest use is live/source-heavy evidence; exact model routing is time-bound.",
-      "Shared-account invariant: always Incognito for Chuck, and keep long Perplexity sessions alive until completion, expiry, or operator close.",
+      "Shared-Max native/Comet invariant: use Incognito for Chuck and keep long Perplexity sessions alive until completion, expiry, or operator close.",
     ],
   },
   {
@@ -237,7 +237,7 @@ const DEFAULT_SETUP_GUIDES: SurfaceSetupGuide[] = [
     setupAction:
       "Confirm Perplexity web access in the browser session, then run the Perplexity web receipt proof.",
     windowPolicy:
-      "Browser fallback; same-family signal only. Prefer the Mac Incognito lease for the shared Max account when available.",
+      "Browser fallback; same-family signal only. This may be Joseph's personal account; prefer the Mac/Comet Incognito lease for shared Max work when available.",
     notes: [
       "No PAYG Perplexity API key in the core path.",
       "Same Perplexity family; strongest use is source-heavy evidence.",

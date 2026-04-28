@@ -69,8 +69,9 @@ const SURFACE_APPS = new Set([
   "Sora", // pending PWA install (OpenAI video gen)
   // Pending installs:
   "Claude", // Claude.ai PWA — collides with native Claude.app at /Applications/Claude.app; anchor logic must distinguish via path or bundle id (TODO)
-  // Perplexity: NOT in this list. Native Perplexity.app already covers the
-  // surface (via Joseph's therivende shared Max account); PWA is redundant.
+  // Perplexity: NOT in this list. Native Perplexity.app and Comet cover the
+  // shared Max account profile; Perplexity web may be Joseph's personal
+  // account and should be tagged separately in receipts.
 ]);
 
 function usage() {

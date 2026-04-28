@@ -4240,7 +4240,19 @@ describe("Chuck V2 Surface Atlas", () => {
         "perplexity-mode-research",
       ]),
     );
+    expect(perplexity?.forms?.[0]?.bestFor).toContain("shared Perplexity Max account");
     expect(perplexity?.masteryGaps.join("\n")).toContain("Repair answer extraction");
+
+    const perplexityWeb = surfaceAtlasEntry("perplexity/web");
+    expect(perplexityWeb?.knownIssues.join("\n")).toContain("personal account");
+
+    const comet = surfaceAtlasEntry("perplexity/comet");
+    expect(comet).toMatchObject({
+      category: "same-family-surface",
+      status: "available-tool",
+      preferredDriver: "computer-use",
+    });
+    expect(comet?.notes.join("\n")).toContain("does not add an independent family vote");
 
     const claudeMac = surfaceAtlasEntry("claude/mac-app");
     expect(claudeMac?.forms?.map((form) => form.kind)).toContain("native-mac-app");

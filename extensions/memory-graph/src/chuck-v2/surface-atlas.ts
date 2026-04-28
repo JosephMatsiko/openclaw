@@ -179,7 +179,8 @@ const PERPLEXITY_LEASE: SurfaceLeasePolicy = {
   sleepPolicy:
     "Incognito work uses one active ephemeral lane; keep it open for active work, reuse it for deepening, and close/sleep only after completion, expiry, or operator close.",
   caveats: [
-    "Shared-account invariant: Chuck uses Incognito.",
+    "Shared-Max native/Comet account invariant: Chuck uses Incognito for that account profile.",
+    "Joseph's personal Perplexity account is also allowed when present, but receipts must tag the account profile/surface used.",
     "Do not create arbitrary parallel Incognito threads; navigate/reset the singleton lane intentionally.",
   ],
 };
@@ -815,7 +816,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       form(
         "native-mac-app",
         "both",
-        "shared Max-seat Incognito lane with source-heavy research continuity",
+        "shared Perplexity Max account Incognito lane with source-heavy research continuity",
         ["single active lane policy; reuse during active work instead of closing after each run"],
       ),
     ],
@@ -848,7 +849,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
         "perplexity-incognito",
         "Incognito Mode",
         "toggle",
-        "Verify and enable Incognito before shared-account work.",
+        "Verify and enable Incognito before shared-Max native/Comet work.",
         {
           coordinate: "922/1470,398/956",
           source: "pixel/OCR verified settings toggle",
@@ -961,25 +962,29 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       ),
     ],
     leasePolicy: WEB_COCKPIT_LEASE,
-    knownIssues: ["User says this is not the shared Max path; ignore as load-bearing Max for now."],
-    masteryGaps: [
-      "Keep separate from Max Mac-app shared account protocol unless operator changes policy.",
+    knownIssues: [
+      "Browser profile may be Joseph's personal account rather than the shared Max native/Comet profile.",
     ],
-    notes: ["Same Perplexity family; not privileged over Mac Max route."],
+    masteryGaps: [
+      "Tag receipts with the observed account profile; do not assume web profile equals shared Max native/Comet.",
+    ],
+    notes: [
+      "Same Perplexity family; personal account is allowed, but it is a separate account profile from shared Max native/Comet unless proven otherwise.",
+    ],
   },
   {
     surface: "perplexity/comet",
     family: "perplexity",
     label: "Perplexity Comet / browser controls",
-    category: "future-surface",
-    status: "planned",
-    preferredDriver: "browser-cdp",
-    launchHint: "Comet/browser automation candidate",
+    category: "same-family-surface",
+    status: "available-tool",
+    preferredDriver: "computer-use",
+    launchHint: "Comet app/browser automation candidate on the shared Perplexity Max profile",
     forms: [
       form(
         "agentic-browser",
         "both",
-        "Perplexity-owned browser/computer-use surface once admitted",
+        "Perplexity-owned browser/computer-use surface on the shared Max account once admitted",
       ),
     ],
     controls: [],
@@ -993,14 +998,18 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       ),
     ],
     toolRoutes: [
-      route("future-comet-driver", "browser-cdp", undefined, [
-        "Candidate surface; requires proof before load-bearing use.",
+      route("future-comet-driver", "computer-use", undefined, [
+        "Operator says Comet is available through the shared Max profile; requires prompt-delivery and answer-attribution proof before load-bearing use.",
       ]),
     ],
-    leasePolicy: WEB_COCKPIT_LEASE,
-    knownIssues: ["No current repeatable runner proof in Chuck."],
-    masteryGaps: ["Onboard as candidate, prove auth/session, then calibrate."],
-    notes: ["Important harvested primitive, not current canon dependency."],
+    leasePolicy: PERPLEXITY_LEASE,
+    knownIssues: ["No current repeatable Comet runner proof in Chuck."],
+    masteryGaps: [
+      "Build/verify Comet driver, prove shared-Max session, then calibrate as same-family Perplexity child.",
+    ],
+    notes: [
+      "Important available Perplexity child surface; it does not add an independent family vote.",
+    ],
   },
   {
     surface: "grok/web-or-app",

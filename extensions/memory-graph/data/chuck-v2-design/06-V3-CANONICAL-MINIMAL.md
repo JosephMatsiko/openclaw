@@ -96,11 +96,13 @@ Current configured families:
 
 Additional optional families and provider-router surfaces can be added only after attribution and calibration. A router is not a family unless the producing model family is verified.
 
-Perplexity shared-account invariant:
+Perplexity account-profile invariant:
 
-- Chuck drives Perplexity in Incognito by default because the account is shared.
+- Chuck may see two valid Perplexity profiles: Joseph's personal Perplexity account and the shared Perplexity Max account.
+- The shared Max profile is the one logged into Perplexity Mac app and Comet; Chuck drives that profile in Incognito by default.
+- Joseph's personal Perplexity account is allowed when present, but receipts must tag which account profile/surface was used.
 - Incognito is a session/privacy boundary, not permission to treat work as disposable.
-- Long Perplexity tasks use an Incognito session lease: keep the thread alive until the task completes, the session expires, or Joseph explicitly closes it.
+- Long shared-Max Perplexity tasks use an Incognito session lease: keep the thread alive until the task completes, the session expires, or Joseph explicitly closes it.
 - Do not close Perplexity windows or threads arbitrarily as cleanup. Cleanup restores clipboard, window placement, receipts, and account-level toggle state without destroying useful active context.
 
 ### 2.3 Evidence Layer

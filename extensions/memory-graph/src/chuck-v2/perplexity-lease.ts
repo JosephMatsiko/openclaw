@@ -82,7 +82,7 @@ export function createPerplexitySessionLease({
     transcriptPath,
     receiptId,
     reasons: [
-      "Perplexity is always driven in Incognito because the account is shared",
+      "Perplexity shared-Max native/Comet profile is driven in Incognito for account-profile isolation",
       ...reasons,
       ...(entitlementStatus === "unknown"
         ? ["Perplexity entitlement is unknown; do not report Max as verified"]

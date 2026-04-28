@@ -25,8 +25,11 @@
 // (which are auto-deleted after read). It respects multi-user shared
 // Max account by saving/restoring the Incognito toggle.
 //
-// Shared-account invariant (2026-04-26):
-//   - Chuck always drives Perplexity in Incognito.
+// Shared-Max native/Comet profile invariant (updated 2026-04-28):
+//   - The Perplexity Mac app and Comet are logged into the shared Max
+//     account Joseph described; Chuck drives that profile in Incognito.
+//   - Joseph's personal Perplexity account is also allowed on other
+//     surfaces, but receipts must tag which account profile/surface was used.
 //   - Incognito is not a synonym for "disposable one-shot prompt".
 //   - Treat Perplexity Incognito as one active ephemeral thread lane, not
 //     as a pool of parallel Incognito threads.
@@ -70,7 +73,7 @@ const ACTIVE_PERPLEXITY_LEASE_PATH = join(PERPLEXITY_LEASE_DIR, "active-mac-app-
 const APP_NAME = "Perplexity";
 const APP_URL_SCHEME = "perplexity-app://";
 
-// Legacy standardized window layout. The current shared-account protocol
+// Legacy standardized window layout. The current shared-Max profile protocol
 // prefers Perplexity fullscreen so the sidebar/settings route is stable.
 // Set PERPLEXITY_MAC_STANDARDIZE=1 only when intentionally using the old
 // fixed-window coordinate path.
@@ -161,7 +164,7 @@ function persistActivePerplexityMacLease({
     },
     modelUsed: modelUsed ?? existing?.modelUsed ?? null,
     reasons: [
-      "shared-account rule: Perplexity is driven in Incognito",
+      "shared-Max native/Comet profile rule: Perplexity is driven in Incognito",
       "active-work rule: keep the Incognito thread open for Scout/Deepen continuity",
       "release only when the work session sleeps, expires, or Joseph closes it",
     ],
@@ -1559,10 +1562,11 @@ export async function askPerplexityMac({
       ) {
         stableTicks += 1;
         if (stableTicks >= stableTicksRequired) {
-          // Shared-account invariant: Perplexity Fleet runs must be
-          // incognito. Do not return content if the app never shows the
-          // ephemeral-thread banner; that would silently save a Fleet probe
-          // into shared account history.
+          // Shared-Max native/Comet profile invariant: Perplexity Fleet
+          // runs through this app path must be incognito. Do not return
+          // content if the app never shows the ephemeral-thread banner;
+          // that would silently save a Fleet probe into shared account
+          // history.
           if (incognito && !incognitoConfirmed) {
             throw new Error(
               "askPerplexityMac: Incognito banner never appeared and Settings did not verify Incognito — thread may have been saved to history",
