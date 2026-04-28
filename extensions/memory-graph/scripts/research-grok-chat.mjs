@@ -274,7 +274,9 @@ async function readReply(tab, prompt = "") {
         /^share$/i
       ];
       for (var line of lines) {
-        if (out.length > 0 && stop.some(function(rx) { return rx.test(line); })) break;
+        var isChrome = stop.some(function(rx) { return rx.test(line); });
+        if (isChrome && out.length === 0) continue;
+        if (isChrome && out.length > 0) break;
         out.push(line);
       }
       return out.join("\\n").trim();
