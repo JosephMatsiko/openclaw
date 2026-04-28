@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import * as chuckV2 from "../src/chuck-v2/index.js";
+// @ts-expect-error - chuck-surface-control is a sibling .mjs file without TS declarations
+import { withWorkstationReturn } from "./chuck-surface-control.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -1206,7 +1208,10 @@ Options:
 `);
 }
 
-main().catch((error) => {
+// Wrap in withWorkstationReturn so any chuck-v2 fleet probe (capability-ledger,
+// onboard-prove, fleet-dispatch, etc.) auto-restores Joseph's workspace on
+// completion. Disable per-invocation with CHUCK_RETURN_WORKSTATION=0.
+withWorkstationReturn(main).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

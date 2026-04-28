@@ -319,6 +319,64 @@ const probeAiStudio = makeCookieProbe({
   matchNames: ["%session%", "SID", "HSID", "SSID", "SAPISID", "APISID"],
 });
 
+async function probeChatGptMac() {
+  const t0 = now();
+  const scriptPath = join(
+    process.cwd(),
+    "extensions",
+    "memory-graph",
+    "scripts",
+    "research-chatgpt-mac.mjs",
+  );
+  if (!existsSync("/Applications/ChatGPT.app")) {
+    return {
+      worker: "chatgpt-mac",
+      healthy: false,
+      latencyMs: now() - t0,
+      details: "ChatGPT.app missing at /Applications/ChatGPT.app",
+    };
+  }
+  const res = await run(process.execPath, [scriptPath, "--calibrate", "--json"], {
+    timeoutMs: 30_000,
+  });
+  if (!res.ok) {
+    return {
+      worker: "chatgpt-mac",
+      healthy: false,
+      latencyMs: now() - t0,
+      details: `calibration failed: exit=${res.code} ${(res.stderr || res.stdout).slice(0, 220)}`,
+    };
+  }
+  try {
+    const parsed = JSON.parse(res.stdout);
+    const loadBearing = parsed?.loadBearing === true;
+    const screenCaptureOk = parsed?.screenCapture?.ok === true;
+    const windows = Number(parsed?.windows ?? 0);
+    const childCount = String(parsed?.chatPaneA11yChildCount ?? "unknown");
+    const caveats = Array.isArray(parsed?.caveats) ? parsed.caveats.filter(Boolean) : [];
+    const details = [
+      `app:yes`,
+      `windows:${windows}`,
+      `chatPaneAXChildren:${childCount}`,
+      `screenCapture:${screenCaptureOk ? "ok" : "blocked"}`,
+      ...caveats,
+    ].join("; ");
+    return {
+      worker: "chatgpt-mac",
+      healthy: loadBearing,
+      latencyMs: now() - t0,
+      details,
+    };
+  } catch (err) {
+    return {
+      worker: "chatgpt-mac",
+      healthy: false,
+      latencyMs: now() - t0,
+      details: `calibration JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 // Codex shares ChatGPT Plus cookies (chatgpt.com/codex is Plus-gated).
 const probeCodex = makeCookieProbe({
   worker: "codex",
@@ -330,6 +388,7 @@ const REGISTRY = {
   claude: probeClaude,
   gemini: probeGemini,
   chatgpt: probeChatGPT,
+  "chatgpt-mac": probeChatGptMac,
   perplexity: probePerplexity,
   grok: probeGrok,
   "claude-ai": probeClaudeAi,

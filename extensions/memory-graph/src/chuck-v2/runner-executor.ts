@@ -1177,6 +1177,10 @@ export function defaultRunnerAdapters(): RunnerAdapter[] {
   return [
     ...defaultLoadBearingRunnerAdapters(),
     createChatGptWebRunnerAdapter(),
+    // ChatGPT.app native Mac client (com.openai.chat) — distinct from
+    // Codex.app (com.openai.codex) per codex-confirmed 2026-04-28.
+    // OpenAI distributes via direct download (not App Store) at
+    // openai.com/chatgpt/desktop. Re-included after verifying app installed.
     createChatGptMacRunnerAdapter(),
     createCodexReviewRunnerAdapter(),
     createClaudeWebRunnerAdapter(),
@@ -1184,6 +1188,9 @@ export function defaultRunnerAdapters(): RunnerAdapter[] {
     createGeminiWebRunnerAdapter(),
     createAiStudioWebRunnerAdapter(),
     createPerplexityMacRunnerAdapter(),
+    // Added 2026-04-28: perplexity/web adapter exists but was missing from
+    // defaults; including it lets perplexity/web be probed via onboard-prove.
+    createPerplexityWebRunnerAdapter(),
     createGrokWebRunnerAdapter(),
   ];
 }

@@ -2116,6 +2116,7 @@ describe("Chuck V2 runnable loop", () => {
       "gemini/web-chat",
       "aistudio/web",
       "perplexity/mac-app",
+      "perplexity/web",
       "grok/web-or-app",
     ]);
   });

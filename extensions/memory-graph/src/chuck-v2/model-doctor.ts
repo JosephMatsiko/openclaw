@@ -170,11 +170,15 @@ const DEFAULT_SETUP_GUIDES: SurfaceSetupGuide[] = [
     surface: "chatgpt/mac-app",
     label: "ChatGPT Mac app",
     authStorage: "app-session",
-    preferredProbe: "open ChatGPT Mac app and run a harmless prompt probe",
+    preferredProbe:
+      "node extensions/memory-graph/scripts/research-chatgpt-mac.mjs --calibrate --json, then run a harmless split-proof prompt",
     setupAction:
-      "Install/log in to ChatGPT Mac app if desired, then run the ChatGPT Mac receipt proof.",
+      "Confirm ChatGPT.app is installed/logged in, grant Screen Recording to the launcher if calibration reports screencapture blocked, then rerun the ChatGPT Mac receipt proof.",
     windowPolicy: "Native app fallback; only load-bearing after repeatable receipt proof.",
-    notes: ["Same OpenAI family as ChatGPT web/Codex; never increases independent family count."],
+    notes: [
+      "Same OpenAI family as ChatGPT web/Codex; never increases independent family count.",
+      "Native chat pane may expose little/no Accessibility tree; answer attribution currently depends on working macOS screen capture.",
+    ],
   },
   {
     family: "google",
@@ -183,7 +187,7 @@ const DEFAULT_SETUP_GUIDES: SurfaceSetupGuide[] = [
     authStorage: "cli-auth-store",
     preferredProbe: "gemini --version && run quota-safe prompt probe",
     setupAction:
-      "Confirm Google AI Plus/Gemini subscription access for the selected Google surface.",
+      "Confirm Google AI Pro/Gemini subscription access for the selected Google surface.",
     windowPolicy: "CLI-first when possible; web fallback uses the shared Chuck web cockpit window.",
     notes: [
       "No PAYG Google API key in the core path.",
@@ -198,7 +202,7 @@ const DEFAULT_SETUP_GUIDES: SurfaceSetupGuide[] = [
     preferredProbe:
       "open gemini.google.com in the shared Chuck web cockpit and run a harmless prompt probe",
     setupAction:
-      "Confirm Gemini Pro/AI Plus is available in the browser/PWA session, then run the Gemini web receipt proof.",
+      "Confirm Gemini Pro/AI Pro is available in the browser/PWA session, then run the Gemini web receipt proof.",
     windowPolicy:
       "Use the shared Chuck web cockpit window or Gemini PWA; same Google family, fallback when CLI quota diverges.",
     notes: [
