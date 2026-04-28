@@ -12,7 +12,7 @@
 //   - claude-cli  : Opus 4.7 via `claude -p --model opus` (Max subscription)
 //   - chatgpt-web : GPT-5.5 (Instant/Thinking) via chatgpt.com web chat
 //   - claude-ai   : Opus 4.7 Adaptive via claude.ai web chat
-//   - gemini-cli  : Gemini 3.1 Pro via `gemini` CLI (AI Plus, optional)
+//   - gemini-cli  : Gemini 3.1 Pro via `gemini` CLI (AI Pro, optional)
 //
 // Usage:
 //   apex-panel-ask.mjs --file <path>              Prompt-body from file
@@ -34,7 +34,68 @@
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
+
+import { withWorkstationReturn } from "./chuck-surface-control.mjs";
+
+// -- Session bus integration (apex-fleet-bridge SQLite WAL) -------------
+// Mirror the bus emit pattern from apex-fleet-bridge so panel runs land in
+// the same hash-chained store as direct ask_X invocations. This makes web
+// surfaces (chatgpt-web, claude-ai, gemini-cli) first-class panel members
+// even though they can't host MCPs themselves — the wrapper emits on their
+// behalf.
+
+let busDb = null;
+async function ensureBus() {
+  if (busDb) {
+    return busDb;
+  }
+  const { DatabaseSync } = await import("node:sqlite");
+  const BUS_PATH = join(homedir(), ".openclaw/workspace/state/chuck-v2/fleet-bus.db");
+  mkdirSync(dirname(BUS_PATH), { recursive: true });
+  busDb = new DatabaseSync(BUS_PATH);
+  busDb.exec(`
+    CREATE TABLE IF NOT EXISTS turns (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      voice_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('prompt', 'reply')),
+      content TEXT NOT NULL,
+      content_sha256 TEXT NOT NULL,
+      prev_receipt_hash TEXT,
+      receipt_hash TEXT NOT NULL,
+      mode TEXT,
+      tokens_in INTEGER,
+      tokens_out INTEGER
+    );
+    PRAGMA journal_mode=WAL;
+  `);
+  return busDb;
+}
+
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+
+async function busEmit({ session_id, voice_id, role, content, mode = null }) {
+  const db = await ensureBus();
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ts = new Date().toISOString();
+  const content_sha256 = sha256(content);
+  const prev = db.prepare("SELECT receipt_hash FROM turns ORDER BY ts DESC LIMIT 1").get();
+  const prev_hash = prev?.receipt_hash ?? null;
+  const receipt_hash = sha256([prev_hash ?? "", ts, voice_id, role, content_sha256].join("\n"));
+  db.prepare(
+    `INSERT INTO turns (id, session_id, ts, voice_id, role, content, content_sha256, prev_receipt_hash, receipt_hash, mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, session_id, ts, voice_id, role, content, content_sha256, prev_hash, receipt_hash, mode);
+  return { id, ts, voice_id, role, receipt_hash };
+}
+
+function activeSessionId() {
+  return process.env.APEX_SESSION_ID ?? `panel-${new Date().toISOString().slice(0, 10)}`;
+}
 
 const DOCS = join(homedir(), "Documents");
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -128,7 +189,11 @@ async function runClaudeCli(prompt) {
 }
 
 async function runGeminiCli(prompt) {
-  return runCli("gemini", ["-p"], prompt);
+  // Gemini CLI changed -p contract: now requires the prompt as its argument
+  // (previously read from stdin). Pass the prompt inline; runCli still
+  // forwards stdin but Gemini concatenates -p value + stdin so the duplication
+  // is harmless.
+  return runCli("gemini", ["-p", prompt], prompt);
 }
 
 async function runCodexCli(prompt) {
@@ -199,7 +264,16 @@ async function main() {
   const opts = parseArgs(process.argv);
   const prompt = buildPrompt(opts);
   const labelStem = pickLabelStem(opts);
+  const session_id = activeSessionId();
   const wantedVoices = opts.only ? opts.only.split(",").map((s) => s.trim()) : Object.keys(VOICES);
+
+  // Emit the panel prompt to the fleet bus (operator turn)
+  try {
+    await busEmit({ session_id, voice_id: "operator", role: "prompt", content: prompt, mode: "panel" });
+  } catch (err) {
+    process.stderr.write(`[panel-ask] bus emit (prompt) failed: ${err?.message ?? err}\n`);
+  }
+
   const tasks = wantedVoices.map(async (id) => {
     const voice = VOICES[id];
     if (!voice) {
@@ -222,13 +296,25 @@ async function main() {
         text,
       ].join("\n");
       writeFileSync(path, body, "utf8");
+      // Emit reply to bus on this voice's behalf — even web/PWA voices
+      // become first-class participants in the fleet bus this way.
+      try {
+        await busEmit({ session_id, voice_id: id, role: "reply", content: text, mode: "panel" });
+      } catch (busErr) {
+        process.stderr.write(`[panel-ask] bus emit (${id} reply) failed: ${busErr?.message ?? busErr}\n`);
+      }
       return { id, ok: true, path, chars: text.length, ms: Date.now() - t0 };
     } catch (err) {
-      return { id, ok: false, error: String(err?.message ?? err), ms: Date.now() - t0 };
+      const errMsg = String(err?.message ?? err);
+      // Emit failure as a bus event too — degraded turns are forensics-relevant
+      try {
+        await busEmit({ session_id, voice_id: id, role: "reply", content: `[error] ${errMsg}`, mode: "panel-error" });
+      } catch { /* ignore */ }
+      return { id, ok: false, error: errMsg, ms: Date.now() - t0 };
     }
   });
   const results = await Promise.all(tasks);
-  console.log(JSON.stringify({ labelStem, results }, null, 2));
+  console.log(JSON.stringify({ labelStem, session_id, results }, null, 2));
   const failed = results.filter((r) => !r.ok && !r.skipped);
   if (failed.length === results.length) {
     process.exitCode = 1;
@@ -238,7 +324,10 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((e) => {
+  // Wrap in withWorkstationReturn so the user's workspace (frontmost app
+  // + Chrome tab) is auto-restored after the panel finishes. Disable with
+  // CHUCK_RETURN_WORKSTATION=0 if you're already inside a wrapping flow.
+  withWorkstationReturn(main).catch((e) => {
     console.error(`[apex-panel-ask] fatal: ${e.stack ?? e}`);
     process.exitCode = 1;
   });
