@@ -50,11 +50,32 @@ async function readCurrentModel(tab) {
   const r = await evalInTab(
     tab,
     `
-    var el = document.querySelector('[aria-label*="model" i]') || document.querySelector('button[aria-haspopup]');
+    var body = document.body.innerText || "";
+    var selected = body.match(/\\n(Gemini[^\\n]+)\\n(gemini-[a-z0-9_.-]+)/i);
+    if (selected) return (selected[1] + " " + selected[2]).trim();
+    var el = Array.from(document.querySelectorAll('button, [role="button"]')).find(function(node) {
+      var text = (node.innerText || node.getAttribute('aria-label') || '').trim();
+      return /^Gemini\\b/i.test(text) && /gemini-/i.test(text);
+    });
     return el ? (el.innerText || el.getAttribute('aria-label') || "").trim() : "";
   `,
   );
   return (r.ok && r.value) || "gemini";
+}
+
+async function dismissBlockingBanners(tab) {
+  await evalInTab(
+    tab,
+    `
+    for (var b of Array.from(document.querySelectorAll('button'))) {
+      var text = (b.innerText || b.textContent || b.getAttribute('aria-label') || '').trim();
+      if (/^(Dismiss|Got it|Close)$/i.test(text) && !b.disabled) {
+        b.click();
+      }
+    }
+    return true;
+  `,
+  );
 }
 
 async function submitPrompt(tab, prompt) {
@@ -78,17 +99,31 @@ async function submitPrompt(tab, prompt) {
     throw new Error(`aistudio insert: ${insert.error ?? insert.value?.error}`);
   }
   await new Promise((r) => setTimeout(r, 500));
+  await dismissBlockingBanners(tab);
   const send = await evalInTab(
     tab,
     `
-    var b = document.querySelector('button[aria-label*="Run" i]')
-         || document.querySelector('button[aria-label*="Send" i]')
-         || document.querySelector('run-button button')
-         || Array.from(document.querySelectorAll('button')).find(function(el){ return /run|send/i.test(el.innerText || el.getAttribute('aria-label') || '') });
+    function visible(el) {
+      return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+    }
+    var buttons = Array.from(document.querySelectorAll('button'));
+    var b = buttons.find(function(el) {
+          var lines = (el.innerText || '').trim().split(/\\n+/).map(function(line) { return line.trim(); });
+          return visible(el) && !el.disabled && lines.includes('Run');
+        })
+         || document.querySelector('run-button button:not([disabled])')
+         || buttons.find(function(el) {
+          var label = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+          return visible(el) && !el.disabled && /\\b(Run|Send)\\b/i.test(label);
+        });
     if (!b) return { ok: false, error: "no send" };
     if (b.disabled) return { ok: false, error: "disabled" };
+    b.scrollIntoView({ block: 'center', inline: 'center' });
+    for (var type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      b.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
     b.click();
-    return { ok: true };
+    return { ok: true, buttonText: (b.innerText || b.getAttribute('aria-label') || '').trim() };
   `,
   );
   if (!send.ok || send.value?.ok === false) {
@@ -100,15 +135,52 @@ async function submitPrompt(tab, prompt) {
   }
 }
 
-async function readReply(tab) {
+async function readReply(tab, prompt = "") {
   const r = await evalInTab(
     tab,
     `
-    var candidates = document.querySelectorAll('ms-chat-turn[_ngcontent-ng], [class*="response" i], [role="article"]');
-    var last = candidates[candidates.length - 1];
-    var text = last ? (last.innerText || last.textContent || "") : "";
-    var running = document.querySelector('[aria-label*="Running" i]') || document.querySelector('button[aria-label*="Stop" i]');
-    return { text: text.trim(), streaming: !!running };
+    var promptText = ${JSON.stringify(String(prompt))};
+    function clean(raw) {
+      var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
+      var out = [];
+      var drop = [
+        /^edit$/i,
+        /^more_vert$/i,
+        /^thumb_up$/i,
+        /^thumb_down$/i,
+        /^info$/i,
+        /^Google AI models may make mistakes/i,
+        /^Use Arrow Up and Arrow Down/i,
+        /^\\d+(?:\\.\\d+)?\\s*(?:ms|s)$/i
+      ];
+      for (var line of lines) {
+        if (drop.some(function(rx) { return rx.test(line); })) continue;
+        if (/^Response ready\\.?$/i.test(line)) break;
+        out.push(line);
+      }
+      return out.join("\\n").trim();
+    }
+    function isPromptEcho(text) {
+      return promptText && text.replace(/\\s+/g, " ").includes(promptText.replace(/\\s+/g, " ").slice(0, 120));
+    }
+    function isUserTurn(text) {
+      return /^User\\s+\\d{1,2}:\\d{2}/i.test(text) || isPromptEcho(text);
+    }
+    var turns = Array.from(document.querySelectorAll('ms-chat-turn'));
+    var texts = turns.map(function(el) {
+      return clean(el.innerText || el.textContent || "");
+    }).filter(function(text) {
+      return text && !/^Thoughts\\b/i.test(text) && !isUserTurn(text);
+    });
+    var structured = texts.filter(function(text) {
+      return /\\b(SURFACE_PROOF_OK|CLAIMS:|RISKS:|MISSING_EVIDENCE:|DEEPEN_NEEDED:)\\b/i.test(text);
+    });
+    var text = (structured.length ? structured[structured.length - 1] : texts[texts.length - 1]) || "";
+    var body = document.body.innerText || "";
+    var responseReady = /\\bResponse ready\\.?\\b/i.test(body);
+    var explicitRunning = /\\bStop\\s+Running\\.\\.\\./i.test(body) ||
+      !!document.querySelector('button[aria-label*="Stop" i], [aria-label*="Running" i]');
+    return { text: text.trim(), streaming: explicitRunning && !responseReady };
   `,
   );
   if (!r.ok) {
@@ -147,10 +219,15 @@ export async function askAiStudioChat({ prompt, forceFresh = true } = {}) {
     }
     throw new Error(`aistudio not ready: ${state.reason}`);
   }
+  await dismissBlockingBanners(tab);
   const model = await readCurrentModel(tab);
   await submitPrompt(tab, String(prompt));
   // 300s — AI Studio streams reasoning/thinking for long-prompt 2.5 Pro runs.
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
+  const text = await pollUntilStable({
+    tab,
+    read: async (activeTab) => await readReply(activeTab, String(prompt)),
+    timeoutMs: 300_000,
+  });
   return { text: text.trim(), modelUsed: `${MODEL_LABEL} (${model})` };
 }
 

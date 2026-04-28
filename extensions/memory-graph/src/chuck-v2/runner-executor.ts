@@ -363,6 +363,9 @@ function looksLikePromptEcho({ text, prompt }: { text: string; prompt?: string }
   if (normalizedPrompt.length >= 120 && normalizedText.startsWith(normalizedPrompt.slice(0, 120))) {
     return true;
   }
+  if (normalizedPrompt.length >= 120 && normalizedText.includes(normalizedPrompt.slice(0, 120))) {
+    return true;
+  }
   return false;
 }
 
@@ -789,10 +792,11 @@ export function createChatGptWebRunnerAdapter({
     family: "openai",
     surface: "chatgpt/web-chat",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--ask", "--json", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "chatgpt/web-chat",
             baseTimeoutMs: task.timeoutMs,
@@ -811,6 +815,7 @@ export function createChatGptWebRunnerAdapter({
         actualFamily: "openai",
         modelClaimed: parsed.modelUsed ?? "chatgpt/web-chat",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
@@ -834,10 +839,11 @@ export function createChatGptMacRunnerAdapter({
     family: "openai",
     surface: "chatgpt/mac-app",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const text = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--prompt", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "chatgpt/mac-app",
             baseTimeoutMs: task.timeoutMs,
@@ -855,6 +861,7 @@ export function createChatGptMacRunnerAdapter({
         actualFamily: "openai",
         modelClaimed: "chatgpt/mac-app",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "app-driver-text",
       };
     },
@@ -878,16 +885,11 @@ export function createClaudeWebRunnerAdapter({
     family: "anthropic",
     surface: "claude/web-chat",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [
-            scriptPath,
-            "--ask",
-            "--json",
-            "--web-only",
-            buildSealedCliScoutPrompt(task.prompt),
-          ],
+          args: [scriptPath, "--ask", "--json", "--web-only", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "claude/web-chat",
             baseTimeoutMs: task.timeoutMs,
@@ -906,6 +908,7 @@ export function createClaudeWebRunnerAdapter({
         actualFamily: "anthropic",
         modelClaimed: parsed.modelUsed ?? "claude/web-chat",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
@@ -929,10 +932,11 @@ export function createClaudeMacRunnerAdapter({
     family: "anthropic",
     surface: "claude/mac-app",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const text = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--prompt", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "claude/mac-app",
             baseTimeoutMs: task.timeoutMs,
@@ -950,6 +954,7 @@ export function createClaudeMacRunnerAdapter({
         actualFamily: "anthropic",
         modelClaimed: "claude/mac-app",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "app-driver-text",
       };
     },
@@ -973,10 +978,11 @@ export function createGeminiWebRunnerAdapter({
     family: "google",
     surface: "gemini/web-chat",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--ask", "--json", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "gemini/web-chat",
             baseTimeoutMs: task.timeoutMs,
@@ -995,6 +1001,7 @@ export function createGeminiWebRunnerAdapter({
         actualFamily: "google",
         modelClaimed: parsed.modelUsed ?? "gemini/web-chat",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
@@ -1018,10 +1025,11 @@ export function createAiStudioWebRunnerAdapter({
     family: "google",
     surface: "aistudio/web",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--ask", "--json", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "aistudio/web",
             baseTimeoutMs: task.timeoutMs,
@@ -1040,6 +1048,7 @@ export function createAiStudioWebRunnerAdapter({
         actualFamily: "google",
         modelClaimed: parsed.modelUsed ?? "aistudio/web",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
@@ -1063,16 +1072,11 @@ export function createPerplexityMacRunnerAdapter({
     family: "perplexity",
     surface: "perplexity/mac-app",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const text = await runCommandWithTimeout(
         {
           command,
-          args: [
-            scriptPath,
-            "--mode",
-            "research",
-            "--prompt",
-            buildSealedCliScoutPrompt(task.prompt),
-          ],
+          args: [scriptPath, "--mode", "research", "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "perplexity/mac-app",
             baseTimeoutMs: task.timeoutMs,
@@ -1090,6 +1094,7 @@ export function createPerplexityMacRunnerAdapter({
         actualFamily: "perplexity",
         modelClaimed: "perplexity/mac-app (incognito)",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "app-driver-text",
       };
     },
@@ -1113,10 +1118,11 @@ export function createPerplexityWebRunnerAdapter({
     family: "perplexity",
     surface: "perplexity/web",
     async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", buildSealedCliScoutPrompt(task.prompt)],
+          args: [scriptPath, "--ask", "--json", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "perplexity/web",
             baseTimeoutMs: task.timeoutMs,
@@ -1135,6 +1141,7 @@ export function createPerplexityWebRunnerAdapter({
         actualFamily: "perplexity",
         modelClaimed: parsed.modelUsed ?? "perplexity/web",
         modelVerified: true,
+        deliveredPrompt,
         extractionMethod: "driver-json",
       };
     },
