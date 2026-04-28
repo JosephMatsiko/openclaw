@@ -782,6 +782,9 @@ importers:
 
   extensions/memory-graph:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.3.6)
       '@xenova/transformers':
         specifier: 2.17.2
         version: 2.17.2
@@ -1436,6 +1439,9 @@ importers:
 
   ui-phone:
     dependencies:
+      '@noble/ed25519':
+        specifier: 3.1.0
+        version: 3.1.0
       lit:
         specifier: ^3.3.2
         version: 3.3.2

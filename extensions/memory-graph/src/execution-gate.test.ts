@@ -21,6 +21,7 @@ describe("execution-gate isCriticalTool", () => {
   test("recognizes the registered critical tool set", () => {
     // memory-graph writers
     expect(isCriticalTool("memory_set_persona")).toBe(true);
+    expect(isCriticalTool("memory_self_edit")).toBe(true);
     expect(isCriticalTool("memory_forget")).toBe(true);
     expect(isCriticalTool("memory_consolidate")).toBe(true);
     expect(isCriticalTool("memory_ingest_claude_code")).toBe(true);
@@ -45,6 +46,7 @@ describe("execution-gate isCriticalTool", () => {
     // These are the minimum invariants. If we add more, great; if we
     // ever accidentally remove one of these, fail loudly.
     expect(CRITICAL_TOOL_NAMES).toContain("memory_set_persona");
+    expect(CRITICAL_TOOL_NAMES).toContain("memory_self_edit");
     expect(CRITICAL_TOOL_NAMES).toContain("memory_forget");
   });
 });

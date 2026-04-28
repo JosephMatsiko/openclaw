@@ -4,8 +4,8 @@ import type {
   ContextEngine,
   ContextEngineInfo,
   IngestResult,
-} from "openclaw/plugin-sdk";
-import { delegateCompactionToRuntime } from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/core";
+import { delegateCompactionToRuntime } from "openclaw/plugin-sdk/core";
 import { lastAssistantText, lastUserText } from "./messages.js";
 import { buildMemoryBlock, buildPrincipleBlock, persistTurn } from "./pipeline.js";
 import type { GraphStorage } from "./storage.js";

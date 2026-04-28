@@ -34,6 +34,11 @@ export const CRITICAL_TOOL_NAMES: readonly string[] = [
   // memory-graph's own persona writer. Already marked CRITICAL in its
   // MCP tool description; this is the runtime counterpart.
   "memory_set_persona",
+  // memory-graph's surgical self-edit — block-level append / replace /
+  // upsert on persona files. Same CRITICAL posture as memory_set_persona
+  // but finer-grained; agents call this when they want to evolve their
+  // own operating instructions mid-turn. Gate on assisted/suggest.
+  "memory_self_edit",
   // memory-graph's pruner via memory_forget — deleting memory rows is
   // durable state change. Typically called after memory_search, but
   // worth a gate in suggest/assisted.

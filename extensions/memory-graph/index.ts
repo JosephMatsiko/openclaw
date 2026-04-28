@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { registerContextEngine } from "openclaw/plugin-sdk";
+import { registerContextEngine } from "openclaw/plugin-sdk/core";
 import { onSessionTranscriptUpdate } from "openclaw/plugin-sdk/agent-harness";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createChuckOpenClawCommand } from "./src/chuck-v2/openclaw-command.js";

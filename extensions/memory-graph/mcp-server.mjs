@@ -13,6 +13,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
+  appendFileSync,
   chmodSync,
   copyFileSync,
   existsSync,
@@ -39,6 +40,9 @@ const SCOPE = process.env.MEMORY_GRAPH_SCOPE || "workspace";
 const SCOPE_ID = process.env.MEMORY_GRAPH_SCOPE_ID || "default";
 const WORKSPACE_DIR =
   process.env.MEMORY_GRAPH_WORKSPACE || join(homedir(), ".openclaw", "workspace");
+const SELF_EDIT_AUDIT_PATH =
+  process.env.MEMORY_GRAPH_SELF_EDIT_AUDIT_PATH ||
+  join(WORKSPACE_DIR, "state", "chuck-v2", "memory-self-edit-events.jsonl");
 const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const PERSONA_FILES = {
   soul: "SOUL.md",
@@ -945,6 +949,220 @@ function setPersona({ file, content, backup = true } = {}) {
   };
 }
 
+// ---------- Self-edit (surgical block-level persona evolution) ----------
+// Letta/MemGPT-style self-editing memory, scoped to Joseph's persona files.
+// Three operations: append, replace (exact-match substring, must be unique),
+// upsert_block (create-or-replace a markdown heading section). Every call
+// requires a rationale (>= 8 chars) that lands in the audit bus event.
+//
+// Gating: this tool is in CRITICAL_TOOL_NAMES. For gateway-dispatched calls
+// (Telegram / terminal), the before_tool_call hook honors executionMode.
+// For Claude Code / Claude Desktop calls, the host's own permission UI is
+// the approval surface. The MCP server itself always applies the edit if
+// invoked — the caller is responsible for being permitted.
+
+const SELF_EDIT_OPERATIONS = /** @type {const} */ (["append", "replace", "upsert_block"]);
+
+function computeDiffSummary(before, after) {
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  return {
+    before: { lines: beforeLines.length, bytes: Buffer.byteLength(before, "utf8") },
+    after: { lines: afterLines.length, bytes: Buffer.byteLength(after, "utf8") },
+    delta: {
+      lines: afterLines.length - beforeLines.length,
+      bytes: Buffer.byteLength(after, "utf8") - Buffer.byteLength(before, "utf8"),
+    },
+  };
+}
+
+function computeUnifiedDiff(before, after, contextLines = 3) {
+  // Minimal hunk around the first divergence. Not a full LCS diff —
+  // good enough for a single-block self-edit + Vanguard audit log.
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let prefix = 0;
+  const minLen = Math.min(a.length, b.length);
+  while (prefix < minLen && a[prefix] === b[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < a.length - prefix &&
+    suffix < b.length - prefix &&
+    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const aStart = Math.max(0, prefix - contextLines);
+  const bStart = Math.max(0, prefix - contextLines);
+  const aHunkEnd = Math.min(a.length, a.length - suffix + contextLines);
+  const bHunkEnd = Math.min(b.length, b.length - suffix + contextLines);
+  const out = [];
+  out.push(`@@ -${aStart + 1},${aHunkEnd - aStart} +${bStart + 1},${bHunkEnd - bStart} @@`);
+  for (let i = aStart; i < prefix; i += 1) {
+    out.push(` ${a[i]}`);
+  }
+  for (let i = prefix; i < a.length - suffix; i += 1) {
+    out.push(`-${a[i]}`);
+  }
+  for (let i = prefix; i < b.length - suffix; i += 1) {
+    out.push(`+${b[i]}`);
+  }
+  for (let i = a.length - suffix; i < aHunkEnd; i += 1) {
+    out.push(` ${a[i]}`);
+  }
+  return out.join("\n");
+}
+
+function applySelfEditOperation(current, params) {
+  const { operation } = params;
+  if (operation === "append") {
+    const { content } = params;
+    if (typeof content !== "string" || content.length === 0) {
+      throw new Error("append: `content` must be a non-empty string");
+    }
+    const sep = current.length === 0 || current.endsWith("\n") ? "" : "\n";
+    const tail = content.endsWith("\n") ? "" : "\n";
+    return current + sep + content + tail;
+  }
+  if (operation === "replace") {
+    const { old_content: oldContent, new_content: newContent } = params;
+    if (typeof oldContent !== "string" || oldContent.length === 0) {
+      throw new Error("replace: `old_content` must be a non-empty string");
+    }
+    if (typeof newContent !== "string") {
+      throw new Error("replace: `new_content` must be a string");
+    }
+    const first = current.indexOf(oldContent);
+    if (first < 0) {
+      throw new Error(
+        "replace: `old_content` not found — the edit is ambiguous or already applied",
+      );
+    }
+    if (current.indexOf(oldContent, first + 1) >= 0) {
+      throw new Error(
+        "replace: `old_content` matches multiple locations — expand the context until it's unique",
+      );
+    }
+    return current.slice(0, first) + newContent + current.slice(first + oldContent.length);
+  }
+  if (operation === "upsert_block") {
+    const { block_heading: blockHeading, block_content: blockContent } = params;
+    if (typeof blockHeading !== "string" || !/^#{1,6}\s+\S/.test(blockHeading.trim())) {
+      throw new Error(
+        'upsert_block: `block_heading` must be a markdown heading like "## Voice calibration"',
+      );
+    }
+    if (typeof blockContent !== "string") {
+      throw new Error("upsert_block: `block_content` must be a string");
+    }
+    const heading = blockHeading.trim();
+    const levelMatch = heading.match(/^(#+)/);
+    const headingLevel = levelMatch ? levelMatch[1].length : 1;
+    const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const headingRe = new RegExp(`^${escapedHeading}\\s*$`, "m");
+    const newBlock = `${heading}\n\n${blockContent.trim()}\n`;
+    const match = headingRe.exec(current);
+    if (!match) {
+      const sep =
+        current.length === 0
+          ? ""
+          : current.endsWith("\n\n")
+            ? ""
+            : current.endsWith("\n")
+              ? "\n"
+              : "\n\n";
+      return current + sep + newBlock;
+    }
+    // Find end of block: next heading of same-or-higher level (1..headingLevel).
+    const nextHeadingRe = new RegExp(`^#{1,${headingLevel}}\\s+\\S`, "m");
+    const afterHeading = current.slice(match.index + match[0].length);
+    const next = nextHeadingRe.exec(afterHeading);
+    const blockEnd = next ? match.index + match[0].length + next.index : current.length;
+    const tail = current.slice(blockEnd).replace(/^\n+/, "");
+    const tailSep = tail.length === 0 ? "" : "\n";
+    return current.slice(0, match.index) + newBlock + tailSep + tail;
+  }
+  throw new Error(`unknown operation: ${operation} (valid: ${SELF_EDIT_OPERATIONS.join(", ")})`);
+}
+
+function emitSelfEditAuditEvent(payload) {
+  mkdirSync(dirname(SELF_EDIT_AUDIT_PATH), { recursive: true });
+  appendFileSync(
+    SELF_EDIT_AUDIT_PATH,
+    `${JSON.stringify({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      source: "memory-graph",
+      type: "self-edit-applied",
+      payload,
+    })}\n`,
+    "utf8",
+  );
+}
+
+async function selfEditPersona(args = {}) {
+  const { file, operation, rationale } = args;
+  if (!file || !(file in PERSONA_FILES)) {
+    throw new Error(
+      `file is required and must be one of: ${Object.keys(PERSONA_FILES).join(", ")}`,
+    );
+  }
+  if (!operation || !SELF_EDIT_OPERATIONS.includes(operation)) {
+    throw new Error(`operation must be one of: ${SELF_EDIT_OPERATIONS.join(", ")}`);
+  }
+  if (typeof rationale !== "string" || rationale.trim().length < 8) {
+    throw new Error(
+      "rationale is required (>= 8 chars) — explain WHY this self-edit is being proposed",
+    );
+  }
+  const path = resolvePersonaPath(file);
+  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const after = applySelfEditOperation(before, args);
+  if (after === before) {
+    return {
+      applied: false,
+      reason: "no-op: operation produced identical content",
+      path,
+    };
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  let backupPath = null;
+  if (existsSync(path)) {
+    backupPath = `${path}.bak.${Date.now()}`;
+    copyFileSync(path, backupPath);
+  }
+  writeFileSync(path, after, "utf8");
+  const summary = computeDiffSummary(before, after);
+  const unifiedDiff = computeUnifiedDiff(before, after);
+  try {
+    emitSelfEditAuditEvent({
+      file,
+      operation,
+      path,
+      backup: backupPath,
+      rationale: rationale.trim(),
+      summary,
+      // Truncate diff in the audit payload to keep JSONL line size bounded;
+      // the full content is recoverable from the .bak.<ts> + current file.
+      unifiedDiffPreview: unifiedDiff.slice(0, 2000),
+    });
+  } catch (err) {
+    console.error(
+      `[memory-graph:self-edit] audit emit failed (non-blocking): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return {
+    applied: true,
+    path,
+    backupPath,
+    rationale: rationale.trim(),
+    summary,
+    unifiedDiff,
+  };
+}
+
 // ---------- Claude Code transcript ingestion ----------
 
 function ensureIngestCursorTable() {
@@ -1505,6 +1723,60 @@ const toolDefs = [
     },
   },
   {
+    name: "memory_self_edit",
+    description:
+      "Surgically evolve one of Joseph's persona files (SOUL, IDENTITY, USER, AGENTS, MEMORY, TOOLS, HEARTBEAT, BOOTSTRAP) at the block level — Letta/MemGPT-style self-editing memory for the Apex. Three operations: `append` (add text to end), `replace` (swap an exact-match substring that occurs exactly once — will fail if it matches multiple locations, so include enough context to make it unique), `upsert_block` (create-or-replace a markdown-heading-delimited section). ALWAYS creates a timestamped .bak.<ts> backup. REQUIRES `rationale` (>= 8 chars) explaining why — this lands in the audit bus event for Vanguard review. CRITICAL per SOUL boundary: execution-mode gate applies on gateway-dispatched calls; Claude Code / Claude Desktop use their own permission surface. Prefer this over memory_set_persona when you want to evolve one section of your own operating instructions without rewriting a whole file. After the call returns applied:true, the next memory_get_persona reflects the change.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          enum: ["soul", "identity", "user", "agents", "memory", "tools", "heartbeat", "bootstrap"],
+          description: "Which persona file to edit.",
+        },
+        operation: {
+          type: "string",
+          enum: ["append", "replace", "upsert_block"],
+          description:
+            "`append` adds content at the end. `replace` swaps an exact substring (must occur exactly once). `upsert_block` creates-or-replaces a markdown-heading section.",
+        },
+        rationale: {
+          type: "string",
+          minLength: 8,
+          description:
+            "Why this self-edit is being made. Lands in the bus event + is visible to Joseph's nightly Vanguard. Not optional.",
+        },
+        content: {
+          type: "string",
+          description:
+            "For `append`: the text to add at the end of the file. Required when operation=append.",
+        },
+        old_content: {
+          type: "string",
+          description:
+            "For `replace`: the exact substring to find. Must match exactly once — include enough surrounding context to be unique. Required when operation=replace.",
+        },
+        new_content: {
+          type: "string",
+          description:
+            "For `replace`: the text that will take old_content's place (may be empty to delete). Required when operation=replace.",
+        },
+        block_heading: {
+          type: "string",
+          description:
+            "For `upsert_block`: the full markdown heading line (e.g., '## Voice calibration'). If present, the block from this heading to the next same-or-higher-level heading is replaced; if absent, the block is appended. Required when operation=upsert_block.",
+        },
+        block_content: {
+          type: "string",
+          description:
+            "For `upsert_block`: the body text placed under block_heading. Required when operation=upsert_block.",
+        },
+      },
+      required: ["file", "operation", "rationale"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "memory_ingest_claude_code",
     description:
       "Tail Joseph's Claude Code session transcripts (~/.claude/projects/*/sessions/*.jsonl) and ingest new user messages as thread nodes. Uses a per-file cursor so each message is ingested once. Makes conversations from Claude Code feed the same memory as Telegram, terminal, and Claude Desktop — no other memory system in the comp table does this. Safe to call repeatedly.",
@@ -1636,6 +1908,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       break;
     case "memory_set_persona":
       result = setPersona(args);
+      break;
+    case "memory_self_edit":
+      result = await selfEditPersona(args);
       break;
     case "memory_ingest_claude_code":
       result = ingestClaudeCodeTranscripts(args);
