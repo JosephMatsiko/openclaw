@@ -7,7 +7,15 @@
 // all in a single auto-refreshing browser page on localhost.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -31,6 +39,8 @@ const SURFACE_RETURN_RECEIPTS_DIR = join(SURFACE_CONTROL_DIR, "return-receipts")
 const STUCK_SURFACE_CONTRIBUTIONS_DIR = join(CHUCK_V2_STATE_DIR, "stuck-surface-contributions");
 const WORK_LEDGER_PATH = join(CHUCK_V2_STATE_DIR, "parallel-work-ledger.jsonl");
 const WORK_LEDGER_LATEST_PATH = join(CHUCK_V2_STATE_DIR, "parallel-work-latest.json");
+const LIVE_BUILD_EVENTS_PATH = join(CHUCK_V2_STATE_DIR, "live-build-events.jsonl");
+const LIVE_BUILD_LATEST_PATH = join(CHUCK_V2_STATE_DIR, "live-build-latest.json");
 const SCORES_PATH = join(STATE_DIR, "apex-principle-scores.json");
 const CURATOR_PATH = join(STATE_DIR, "apex-curator-state.json");
 const FLEET_ROUTER_PATH = join(STATE_DIR, "fleet-router-scores.json");
@@ -286,6 +296,62 @@ function workLedgerStatus({ limit = 12 } = {}) {
     })),
     git,
   };
+}
+
+function liveBuildStatus({ limit = 20 } = {}) {
+  const latest = readJsonSafe(LIVE_BUILD_LATEST_PATH, null);
+  const events = latest?.events?.length
+    ? latest.events.slice(0, limit)
+    : readJsonlTail(LIVE_BUILD_EVENTS_PATH, { limit });
+  const active = new Map();
+  for (const event of [...events].toReversed()) {
+    const runId = event.runId ?? event.id;
+    if (!runId) {
+      continue;
+    }
+    const existing = active.get(runId);
+    if (!existing || Date.parse(event.createdAt ?? 0) >= Date.parse(existing.createdAt ?? 0)) {
+      active.set(runId, event);
+    }
+  }
+  const activeRuns = [...active.values()]
+    .filter((event) => ["started", "running"].includes(event.status))
+    .toSorted((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
+  return {
+    available: latest !== null || events.length > 0,
+    generatedAt: new Date().toISOString(),
+    eventsPath: LIVE_BUILD_EVENTS_PATH,
+    latestPath: LIVE_BUILD_LATEST_PATH,
+    latestEvent: latest?.latestEvent ?? events[0] ?? null,
+    activeRuns,
+    events,
+  };
+}
+
+function appendLiveBuildEvent(event) {
+  const entry = {
+    id: `live-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`,
+    createdAt: new Date().toISOString(),
+    ...event,
+  };
+  const dir = dirname(LIVE_BUILD_EVENTS_PATH);
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(LIVE_BUILD_EVENTS_PATH, `${JSON.stringify(entry)}\n`, "utf8");
+    const events = readJsonlTail(LIVE_BUILD_EVENTS_PATH, { limit: 30 });
+    const latest = {
+      available: true,
+      generatedAt: new Date().toISOString(),
+      eventsPath: LIVE_BUILD_EVENTS_PATH,
+      latestPath: LIVE_BUILD_LATEST_PATH,
+      latestEvent: entry,
+      events,
+    };
+    writeFileSync(LIVE_BUILD_LATEST_PATH, `${JSON.stringify(latest, null, 2)}\n`, "utf8");
+  } catch {
+    /* live events must never break the command path */
+  }
+  return entry;
 }
 
 function latestJsonInDir(dir) {
@@ -1194,6 +1260,12 @@ async function buildSnapshot() {
     events: [],
     lanes: [],
   });
+  const liveBuild = safe(liveBuildStatus, {
+    available: false,
+    reason: "live build events unavailable",
+    events: [],
+    activeRuns: [],
+  });
   const modelDoctor = safe(modelDoctorStatus, {
     available: false,
     reason: "model doctor unavailable",
@@ -1243,6 +1315,7 @@ async function buildSnapshot() {
     router,
     builder,
     workLedger,
+    liveBuild,
     modelDoctor,
     familyRegistry,
     latestFleetRun,
@@ -1361,6 +1434,15 @@ function dashboardCommandTimeoutMs({ kind, prompt = "", autoDeepen = true } = {}
 function runChuckCli(args, { timeoutMs, maxBufferBytes = 12 * 1024 * 1024 } = {}) {
   return new Promise((resolveRun) => {
     const startedAt = new Date().toISOString();
+    const runId = `dash-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+    appendLiveBuildEvent({
+      runId,
+      status: "started",
+      kind: String(args[0] ?? "chuck-cli"),
+      args,
+      timeoutMs,
+      summary: `started ${args.join(" ")}`,
+    });
     const child = spawn(process.execPath, ["--import", "tsx", CHUCK_V2_RUN, ...args], {
       cwd: REPO_ROOT,
       env: {
@@ -1394,6 +1476,16 @@ function runChuckCli(args, { timeoutMs, maxBufferBytes = 12 * 1024 * 1024 } = {}
     timer.unref();
     child.on("error", (error) => {
       clearTimeout(timer);
+      appendLiveBuildEvent({
+        runId,
+        status: "failed",
+        kind: String(args[0] ?? "chuck-cli"),
+        args,
+        error: error instanceof Error ? error.message : String(error),
+        stdoutBytes: Buffer.byteLength(stdout, "utf8"),
+        stderrBytes: Buffer.byteLength(stderr, "utf8"),
+        summary: `failed to start ${args.join(" ")}`,
+      });
       resolveRun({
         ok: false,
         timedOut,
@@ -1418,8 +1510,24 @@ function runChuckCli(args, { timeoutMs, maxBufferBytes = 12 * 1024 * 1024 } = {}
           parseError = error instanceof Error ? error.message : String(error);
         }
       }
+      const ok = exitCode === 0 && !timedOut && !parseError;
+      appendLiveBuildEvent({
+        runId,
+        status: ok ? "passed" : timedOut ? "timeout" : "failed",
+        kind: String(args[0] ?? "chuck-cli"),
+        args,
+        exitCode,
+        signal,
+        timedOut,
+        parseError,
+        stdoutBytes: Buffer.byteLength(stdout, "utf8"),
+        stderrBytes: Buffer.byteLength(stderr, "utf8"),
+        startedAt,
+        endedAt: new Date().toISOString(),
+        summary: `${ok ? "passed" : timedOut ? "timed out" : "failed"} ${args.join(" ")}`,
+      });
       resolveRun({
-        ok: exitCode === 0 && !timedOut && !parseError,
+        ok,
         timedOut,
         exitCode,
         signal,
@@ -1988,8 +2096,9 @@ const DASHBOARD_HTML = `<!doctype html>
   </div>
 	</section>
 	<section><h2 class="section">Fleet Readiness Board</h2><div id="capability-ledger"><div class="empty">loading…</div></div></section>
-	<section><h2 class="section">Surface Transport Audit</h2><div id="transport-audit"><div class="empty">loading…</div></div></section>
-	<section><h2 class="section">Latest Fleet Run</h2><div id="latest-fleet-run"><div class="empty">loading…</div></div></section>
+<section><h2 class="section">Surface Transport Audit</h2><div id="transport-audit"><div class="empty">loading…</div></div></section>
+<section><h2 class="section">Latest Fleet Run</h2><div id="latest-fleet-run"><div class="empty">loading…</div></div></section>
+<section><h2 class="section">Live Build Timeline</h2><div id="live-build"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Parallel Work Ledger</h2><div id="work-ledger"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Surface Return</h2><div id="surface-control"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Surface Atlas</h2><div id="surface-atlas"><div class="empty">loading…</div></div></section>
@@ -2620,6 +2729,43 @@ const DASHBOARD_HTML = `<!doctype html>
       '</div>';
   }
 
+  function renderLiveBuild(live) {
+    const root = $("live-build");
+    if (!root) { return; }
+    if (!live?.available) {
+      root.innerHTML = '<div class="empty">' + escHtml(live?.reason ?? "no live build events yet") + '</div>';
+      return;
+    }
+    const events = live.events || [];
+    const active = live.activeRuns || [];
+    const summary = [
+      metric("active", active.length),
+      metric("events", events.length),
+      metric("latest", live.latestEvent ? fmtAgo(live.latestEvent.createdAt) : "none"),
+      metric("latest status", live.latestEvent?.status || "none"),
+    ].join("");
+    const rows = events.slice(0, 14).map((event) => {
+      const tone = event.status === "passed" ? "ok" : event.status === "started" || event.status === "running" ? "warn" : "err";
+      const details = [
+        event.kind,
+        event.exitCode == null ? null : "exit=" + event.exitCode,
+        event.timedOut ? "timeout" : null,
+        event.stdoutBytes == null ? null : "stdout=" + event.stdoutBytes + "B",
+        event.stderrBytes == null ? null : "stderr=" + event.stderrBytes + "B",
+      ].filter(Boolean).join(" · ");
+      return '<li style="display:block;"><div style="display:flex;justify-content:space-between;gap:10px;">' +
+        '<span class="slug">' + escHtml(event.summary || event.runId || "live event") + '</span><span class="w" style="color:var(--' + tone + ');">' +
+        escHtml(event.status || "unknown") + '</span></div>' +
+        '<div style="color:var(--fg-dim);margin-top:3px;">' + escHtml(details || event.runId || "") + '</div>' +
+        '<div style="color:var(--fg-faint);margin-top:3px;">' + escHtml(fmtAgo(event.createdAt)) + '</div>' +
+        '</li>';
+    }).join("");
+    root.innerHTML = '<div class="run-summary">' + summary + '</div>' +
+      '<div class="card"><ul class="princ">' +
+      (rows || '<li><span class="slug">no events yet</span><span class="w">idle</span></li>') +
+      '</ul></div>';
+  }
+
   function renderCapabilityLedger(ledger) {
     const root = $("capability-ledger");
     if (!root) { return; }
@@ -3085,6 +3231,7 @@ const DASHBOARD_HTML = `<!doctype html>
       renderHeader(snap); renderFleet(snap.fleet, snap.familyRegistry); renderProcs(snap.processes);
       renderScorer(snap.scorer); renderCurator(snap.curator); renderRouter(snap.router);
       renderBuilder(snap.builder);
+      renderLiveBuild(snap.liveBuild);
       renderWorkLedger(snap.workLedger);
       renderCapabilityLedger(snap.capabilityLedger);
       renderTransportAudit(snap.transportAudit);
