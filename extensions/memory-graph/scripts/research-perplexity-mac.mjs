@@ -1744,7 +1744,7 @@ export async function askPerplexityMac({
           });
           try {
             workstationReturnResult = await restoreWorkstation(workstation);
-            workstationReturned = Boolean(workstationReturnResult?.ok);
+            workstationReturned = workstationReturnResult?.ok ?? false;
           } catch (error) {
             process.stderr.write(
               `[perp-mac] workstation return failed before receipt: ${error?.message ?? error}\n`,

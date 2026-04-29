@@ -186,13 +186,14 @@ export function buildSurfaceTransportAudit({
       ledgerEntry?.readiness === "blocked"
         ? ledgerEntry.nextRepairAction
         : nextActionForGaps(gaps, entry);
+    const readiness: SurfaceTransportAuditEntry["readiness"] = ledgerEntry?.readiness ?? "unknown";
     return {
       surface: entry.surface,
       family: entry.family,
       label: entry.label,
       primaryTransport: primaryTransportForEntry(entry),
       fallbackTransports: fallbackTransportsForEntry(entry),
-      readiness: (ledgerEntry?.readiness ?? "unknown") as SurfaceTransportAuditEntry["readiness"],
+      readiness,
       proofGrade,
       requiredProofs,
       provenProofs,

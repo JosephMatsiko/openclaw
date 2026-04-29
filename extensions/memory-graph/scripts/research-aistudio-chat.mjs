@@ -462,7 +462,7 @@ export async function askAiStudioChat({
 function transportProofsForAiStudio({ model = "", submitProof = {}, url = "" } = {}) {
   const checkedAt = new Date().toISOString();
   const runButtonVisible = /\bRun\b/i.test(String(submitProof.buttonText ?? ""));
-  const modelKnown = Boolean(String(model).trim());
+  const modelKnown = Boolean(model.trim());
   return [
     {
       surface: "aistudio/web",

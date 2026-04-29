@@ -89,11 +89,11 @@ function main() {
   const evidence = opts.evidence;
   const transportOnly = opts["transport-only"] === true;
   if (!surface || !method || !evidence || (!transportOnly && !family)) {
-    throw new Error(`${usage()}`);
+    throw new Error(usage());
   }
   const verdict = opts.verdict ?? "proved";
   if (!["proved", "failed", "missing"].includes(verdict)) {
-    throw new Error(`${usage()}`);
+    throw new Error(usage());
   }
   const checkedAt = new Date().toISOString();
   const caveats = opts.caveat ? [opts.caveat] : [];

@@ -542,12 +542,11 @@ export async function askPerplexityComet({
       timeoutMs,
     });
     answerAttributed =
-      (answer.count > before || /\bSURFACE_PROOF_OK\b/.test(String(answer.text))) &&
-      Boolean(answer.text);
+      (answer.count > before || /\bSURFACE_PROOF_OK\b/.test(answer.text)) && Boolean(answer.text);
     extractionMethod = "driver-json";
     try {
       workstationReturnResult = await restoreWorkstation(workstation);
-      workstationReturned = Boolean(workstationReturnResult?.ok);
+      workstationReturned = workstationReturnResult?.ok ?? false;
     } catch (error) {
       process.stderr.write(
         `[perplexity-comet] workstation return failed before receipt: ${error?.message ?? error}\n`,
@@ -565,7 +564,7 @@ export async function askPerplexityComet({
       answerAttributionProof: proof(
         answerAttributed ? "proved" : "failed",
         "comet-dom-latest-answer-after-submit",
-        `answerCount advanced from ${before} to ${answer.count}; proofToken=${/\bSURFACE_PROOF_OK\b/.test(String(answer.text))}`,
+        `answerCount advanced from ${before} to ${answer.count}; proofToken=${/\bSURFACE_PROOF_OK\b/.test(answer.text)}`,
       ),
       extractionMethod,
       transportProofs: transportProofs({
@@ -598,8 +597,7 @@ async function mainCli() {
   const timeoutIdx = argv.indexOf("--timeout-ms");
   const timeoutMs =
     timeoutIdx >= 0 ? Number.parseInt(argv[timeoutIdx + 1] ?? "300000", 10) : undefined;
-  const prompt =
-    promptIdx >= 0 ? String(argv[promptIdx + 1] ?? "").trim() : positional.join(" ").trim();
+  const prompt = promptIdx >= 0 ? (argv[promptIdx + 1] ?? "").trim() : positional.join(" ").trim();
   if (!prompt) {
     console.error(
       "usage: research-perplexity-comet.mjs [--ask] [--json] [--timeout-ms N] [--prompt TEXT] <prompt>",

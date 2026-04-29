@@ -202,7 +202,8 @@ export async function askChatGPTChat({ prompt, forceFresh = true } = {}) {
 
 function transportProofsForChatGptWeb({ model = "", submitProof = {}, url = "" } = {}) {
   const checkedAt = new Date().toISOString();
-  const modelKnown = Boolean(String(model).trim() && String(model).trim() !== "unknown");
+  const trimmedModel = model.trim();
+  const modelKnown = Boolean(trimmedModel && trimmedModel !== "unknown");
   return [
     {
       surface: "chatgpt/web-chat",

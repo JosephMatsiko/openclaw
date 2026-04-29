@@ -226,7 +226,7 @@ function dashboardGitSnapshot({ limit = 80 } = {}) {
       files: [],
     };
   }
-  const files = String(status.stdout ?? "")
+  const files = (status.stdout ?? "")
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean)
