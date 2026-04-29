@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CHUCK_V2_STATE_DIR, configWithSafeCliScoutSurfaces } from "./config.js";
@@ -37,6 +38,13 @@ export type CapabilitySovereigntyLevel =
   | "external"
   | "unknown";
 export type CapabilityRevocationState = "active" | "revoked" | "not-proven";
+export type CapabilityRuntimeState =
+  | "headless"
+  | "running"
+  | "closed-launchable"
+  | "browser-available"
+  | "not-installed"
+  | "unknown";
 export type SurfaceProofVerdict = "proved" | "missing" | "failed";
 export type SurfaceExtractionMethod =
   | "http-json"
@@ -69,6 +77,15 @@ export type SurfaceProofDetail = {
   proofModel: "split" | "legacy";
 };
 
+export type SurfaceRuntimeRecord = {
+  surface: string;
+  runtimeState: CapabilityRuntimeState;
+  checkedAt: string;
+  appPath?: string;
+  processHint?: string;
+  caveats: string[];
+};
+
 export type LateSurfaceRecovery = {
   surface: string;
   family: ChuckFamily;
@@ -97,6 +114,9 @@ export type CapabilityLedgerEntry = {
   quotaClass: CapabilityQuotaClass;
   sovereigntyLevel: CapabilitySovereigntyLevel;
   revocationState: CapabilityRevocationState;
+  runtimeState: CapabilityRuntimeState;
+  runtimeCaveats: string[];
+  appPath?: string;
   countsAsIndependentFamily: boolean;
   canCountForFamily: boolean;
   promptDeliveryProof: SurfaceProofRecord;
@@ -153,6 +173,7 @@ export type BuildCapabilityLedgerInput = {
   doctor?: ModelDoctorReport;
   executionProofs?: Record<string, RunnerSurfaceProof>;
   proofDetails?: Record<string, SurfaceProofDetail>;
+  runtimeStates?: Record<string, SurfaceRuntimeRecord>;
   lateRecoveries?: LateSurfaceRecovery[];
   resources?: MachineResourceSnapshot;
   generatedAt?: string;
@@ -164,6 +185,7 @@ export function buildCapabilityLedger({
   executionProofs = {},
   doctor = runModelDoctor({ config, executionProofs }),
   proofDetails = {},
+  runtimeStates = {},
   lateRecoveries = [],
   resources,
   generatedAt = new Date().toISOString(),
@@ -178,6 +200,7 @@ export function buildCapabilityLedger({
       doctorRow: doctorBySurface.get(atlasEntry.surface),
       executionProof: executionProofs[atlasEntry.surface],
       proofDetail: proofDetails[atlasEntry.surface],
+      runtimeState: runtimeStates[atlasEntry.surface],
       lateRecovery: lateBySurface.get(atlasEntry.surface),
       resources,
     }),
@@ -198,6 +221,7 @@ export function ledgerEntryForSurface(
     doctorRow,
     executionProof,
     proofDetail,
+    runtimeState,
     lateRecovery,
     resources,
   }: {
@@ -206,6 +230,7 @@ export function ledgerEntryForSurface(
     doctorRow?: ModelDoctorReport["rows"][number];
     executionProof?: RunnerSurfaceProof;
     proofDetail?: SurfaceProofDetail;
+    runtimeState?: SurfaceRuntimeRecord;
     lateRecovery?: LateSurfaceRecovery;
     resources?: MachineResourceSnapshot;
   },
@@ -233,6 +258,7 @@ export function ledgerEntryForSurface(
       ? ["critical memory pressure; only trivial work should run"]
       : []),
     ...(doctorRow?.status === "blocked" ? [doctorRow.healthReason] : []),
+    ...(runtimeState?.caveats ?? []),
   ].filter(Boolean);
   const failureMode = activeLateRecovery
     ? activeLateRecovery.label
@@ -250,6 +276,7 @@ export function ledgerEntryForSurface(
     executionProof,
     proofDetail,
     lateRecovery: activeLateRecovery,
+    runtimeState,
     promptDeliveryProof,
     answerAttributionProof,
     resources,
@@ -271,6 +298,9 @@ export function ledgerEntryForSurface(
     quotaClass,
     sovereigntyLevel: sovereigntyLevelForSurface({ family, atlasEntry, configEntry }),
     revocationState: readiness === "blocked" ? "not-proven" : "active",
+    runtimeState: runtimeState?.runtimeState ?? inferredRuntimeStateForSurface(atlasEntry),
+    runtimeCaveats: runtimeState?.caveats ?? [],
+    appPath: runtimeState?.appPath,
     countsAsIndependentFamily: false,
     canCountForFamily: readiness === "load-bearing" && isChuckFamily(family),
     promptDeliveryProof,
@@ -281,6 +311,7 @@ export function ledgerEntryForSurface(
       readiness,
       doctorRow,
       lateRecovery: activeLateRecovery,
+      runtimeState,
       proofDetail,
       executionProof,
     }),
@@ -430,6 +461,10 @@ export function buildCapabilityLedgerForState({
 } = {}): CapabilityLedger {
   const executionProofs = providedExecutionProofs ?? loadRunnerSurfaceProofs({ stateDir });
   const proofDetails = loadSurfaceProofDetails({ stateDir });
+  const runtimeStates = detectSurfaceRuntimeStates({
+    atlas: surfaceAtlasSummary({ config }),
+    generatedAt,
+  });
   const doctor =
     providedDoctor ?? runModelDoctor({ config, stateDir, executionProofs, health, generatedAt });
   return buildCapabilityLedger({
@@ -437,6 +472,7 @@ export function buildCapabilityLedgerForState({
     doctor,
     executionProofs,
     proofDetails,
+    runtimeStates,
     lateRecoveries: loadLateSurfaceRecoveries({ stateDir }),
     resources,
     generatedAt,
@@ -696,6 +732,7 @@ function readinessForSurface({
   executionProof,
   proofDetail,
   lateRecovery,
+  runtimeState,
   promptDeliveryProof,
   answerAttributionProof,
   resources,
@@ -705,6 +742,7 @@ function readinessForSurface({
   executionProof?: RunnerSurfaceProof;
   proofDetail?: SurfaceProofDetail;
   lateRecovery?: LateSurfaceRecovery;
+  runtimeState?: SurfaceRuntimeRecord;
   promptDeliveryProof: SurfaceProofRecord;
   answerAttributionProof: SurfaceProofRecord;
   resources?: MachineResourceSnapshot;
@@ -726,6 +764,17 @@ function readinessForSurface({
   }
   if (executionProof?.latestStatus === "failed") {
     return "degraded";
+  }
+  const runtime = runtimeState?.runtimeState;
+  if (runtime && requiresActiveSurfaceRuntime(atlasEntry) && runtime === "not-installed") {
+    return executionProof?.successes ? "degraded" : "blocked";
+  }
+  if (
+    runtime &&
+    requiresActiveSurfaceRuntime(atlasEntry) &&
+    (runtime === "closed-launchable" || runtime === "browser-available")
+  ) {
+    return executionProof?.successes || proofDetail ? "provisional" : "degraded";
   }
   if (
     proofDetail?.proofModel === "split" &&
@@ -892,6 +941,7 @@ function nextRepairActionForSurface({
   readiness,
   doctorRow,
   lateRecovery,
+  runtimeState,
   proofDetail,
   executionProof,
 }: {
@@ -899,11 +949,21 @@ function nextRepairActionForSurface({
   readiness: CapabilityReadiness;
   doctorRow?: ModelDoctorReport["rows"][number];
   lateRecovery?: LateSurfaceRecovery;
+  runtimeState?: SurfaceRuntimeRecord;
   proofDetail?: SurfaceProofDetail;
   executionProof?: RunnerSurfaceProof;
 }): string {
   if (readiness === "load-bearing") {
     return "Keep drift probes current; route by task class and quota.";
+  }
+  if (
+    runtimeState?.runtimeState === "closed-launchable" ||
+    runtimeState?.runtimeState === "browser-available"
+  ) {
+    return `Wake ${surface}, establish an active lease, then rerun split proof.`;
+  }
+  if (runtimeState?.runtimeState === "not-installed") {
+    return `Install or restore the app/browser surface for ${surface}, then rerun onboarding proof.`;
   }
   if (readiness === "blocked" && doctorRow?.status === "blocked") {
     return doctorRow.nextAction;
@@ -1011,6 +1071,167 @@ function isCliLikeSurface(entry?: SurfaceAtlasEntry): boolean {
     entry?.surface.endsWith("/exec") ||
     entry?.surface === "ollama/localhost"
   );
+}
+
+function requiresActiveSurfaceRuntime(entry?: SurfaceAtlasEntry): boolean {
+  return Boolean(
+    entry &&
+    (entry.preferredDriver === "browser-cdp" ||
+      entry.preferredDriver === "computer-use" ||
+      entry.forms?.some((form) =>
+        ["native-mac-app", "pwa", "browser-tab", "browser-or-pwa", "agentic-browser"].includes(
+          form.kind,
+        ),
+      )),
+  );
+}
+
+function inferredRuntimeStateForSurface(entry?: SurfaceAtlasEntry): CapabilityRuntimeState {
+  if (!entry) {
+    return "unknown";
+  }
+  if (isCliLikeSurface(entry) || isConnectorOrToolSurface(entry)) {
+    return "headless";
+  }
+  if (entry.preferredDriver === "browser-cdp") {
+    return "browser-available";
+  }
+  return "unknown";
+}
+
+export function detectSurfaceRuntimeStates({
+  atlas = surfaceAtlasSummary(),
+  generatedAt = new Date().toISOString(),
+}: {
+  atlas?: SurfaceAtlasSummary;
+  generatedAt?: string;
+} = {}): Record<string, SurfaceRuntimeRecord> {
+  const processes = readProcessTable();
+  const entries = atlas.entries.map((entry) => {
+    const appPath = appPathForSurface(entry.surface);
+    const runningHint = runningProcessHintForSurface(entry.surface, processes);
+    const runtimeState = runtimeStateForAtlasEntry(entry, appPath, runningHint);
+    const caveats = runtimeCaveatsForState(entry, runtimeState);
+    return [
+      entry.surface,
+      {
+        surface: entry.surface,
+        runtimeState,
+        checkedAt: generatedAt,
+        ...(appPath ? { appPath } : {}),
+        ...(runningHint ? { processHint: runningHint.slice(0, 180) } : {}),
+        caveats,
+      } satisfies SurfaceRuntimeRecord,
+    ] as const;
+  });
+  return Object.fromEntries(entries);
+}
+
+function runtimeStateForAtlasEntry(
+  entry: SurfaceAtlasEntry,
+  appPath: string | undefined,
+  runningHint: string | undefined,
+): CapabilityRuntimeState {
+  if (isCliLikeSurface(entry) || isConnectorOrToolSurface(entry)) {
+    return "headless";
+  }
+  if (runningHint) {
+    return "running";
+  }
+  if (appPath) {
+    return "closed-launchable";
+  }
+  if (entry.preferredDriver === "browser-cdp") {
+    return readProcessTable().some((line) => /Google Chrome|Safari|Comet|Arc|Brave/i.test(line))
+      ? "browser-available"
+      : "closed-launchable";
+  }
+  return requiresActiveSurfaceRuntime(entry) ? "not-installed" : "unknown";
+}
+
+function runtimeCaveatsForState(
+  entry: SurfaceAtlasEntry,
+  runtimeState: CapabilityRuntimeState,
+): string[] {
+  if (!requiresActiveSurfaceRuntime(entry)) {
+    return [];
+  }
+  if (runtimeState === "running") {
+    return [];
+  }
+  if (runtimeState === "closed-launchable") {
+    return ["surface is installed/launchable but no active runtime lease is proven right now"];
+  }
+  if (runtimeState === "browser-available") {
+    return ["browser transport is available, but this specific surface has no active proven lease"];
+  }
+  if (runtimeState === "not-installed") {
+    return ["surface app/browser shell is not installed or not discoverable"];
+  }
+  return ["runtime presence unknown; proof may be stale"];
+}
+
+function appPathForSurface(surface: string): string | undefined {
+  const candidates = appCandidatesForSurface(surface);
+  return candidates.find((path) => existsSync(path));
+}
+
+function appCandidatesForSurface(surface: string): string[] {
+  const apps = ["/Applications", join(process.env.HOME ?? "", "Applications")];
+  const names = surface.startsWith("claude/")
+    ? ["Claude.app"]
+    : surface === "chatgpt/mac-app"
+      ? ["ChatGPT.app"]
+      : surface === "chatgpt/web-chat"
+        ? ["ChatGPT.app", "ChatGPT Atlas.app", "Google Chrome.app"]
+        : surface === "perplexity/mac-app"
+          ? ["Perplexity.app"]
+          : surface === "perplexity/comet"
+            ? ["Comet.app"]
+            : surface === "perplexity/web"
+              ? ["Perplexity.app", "Comet.app", "Google Chrome.app"]
+              : surface.startsWith("gemini/") || surface === "aistudio/web"
+                ? ["Google Chrome.app", "Safari.app"]
+                : surface.startsWith("grok/")
+                  ? ["Google Chrome.app", "Safari.app"]
+                  : [];
+  return apps.flatMap((dir) => names.map((name) => join(dir, name)));
+}
+
+function runningProcessHintForSurface(surface: string, processes: string[]): string | undefined {
+  const pattern = surface.startsWith("claude/")
+    ? /\/Claude\.app\//
+    : surface === "chatgpt/mac-app"
+      ? /\/ChatGPT\.app\//
+      : surface === "chatgpt/web-chat"
+        ? /\/ChatGPT(\sAtlas)?\.app\/|Google Chrome/
+        : surface === "perplexity/mac-app"
+          ? /\/Perplexity\.app\//
+          : surface === "perplexity/comet"
+            ? /\/Comet\.app\//
+            : surface === "perplexity/web"
+              ? /\/Perplexity\.app\/|\/Comet\.app\/|Google Chrome/
+              : surface.startsWith("gemini/") || surface === "aistudio/web"
+                ? /Google Chrome|Safari/
+                : surface.startsWith("grok/")
+                  ? /Google Chrome|Safari/
+                  : undefined;
+  return pattern ? processes.find((line) => pattern.test(line)) : undefined;
+}
+
+function readProcessTable(): string[] {
+  try {
+    return execFileSync("/bin/ps", ["-axo", "args"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function isChuckFamily(family: unknown): family is ChuckFamily {

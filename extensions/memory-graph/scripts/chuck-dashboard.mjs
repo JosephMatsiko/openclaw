@@ -2798,12 +2798,13 @@ const DASHBOARD_HTML = `<!doctype html>
       const proof = "prompt " + (entry.promptDeliveryProof?.verdict || "missing") +
         " · answer " + (entry.answerAttributionProof?.verdict || "missing") +
         " · " + (entry.extractionMethod || "unknown");
+      const runtime = entry.runtimeState ? " · runtime: " + entry.runtimeState : "";
       return '<div class="receipt" data-family="' + escHtml(entry.family) + '"><div class="top"><span class="family">' +
         escHtml(entry.family + " · " + entry.surface) + '</span><span class="status ' + cls + '">' + escHtml(entry.readiness) +
         '</span></div><div style="color:var(--fg-dim);">' + escHtml(proof) + '</div>' +
         '<div style="color:var(--fg-dim);margin-top:3px;">count-family: ' + escHtml(entry.countsAsIndependentFamily ? "yes" : "no") +
         ' · confidence: ' + escHtml(entry.confidence || "unknown") +
-        ' · age: ' + escHtml(fmtAgo(entry.lastProofAt)) + '</div>' +
+        ' · age: ' + escHtml(fmtAgo(entry.lastProofAt)) + escHtml(runtime) + '</div>' +
         (caveats ? '<div style="color:var(--warn);margin-top:3px;">' + escHtml(caveats) + '</div>' : '') +
         '<div style="color:var(--fg-faint);font:11px var(--mono);margin-top:3px;">next: ' + escHtml(entry.nextRepairAction || "") + '</div>' +
         '</div>';
