@@ -4400,7 +4400,7 @@ describe("Chuck V2 Surface Atlas", () => {
     expect(comet?.notes.join("\n")).toContain("does not add an independent family vote");
 
     const grok = surfaceAtlasEntry("grok/web-or-app");
-    expect(grok?.forms.find((form) => form.kind === "pwa")?.caveats?.join("\n")).toContain(
+    expect(grok?.forms?.find((form) => form.kind === "pwa")?.caveats?.join("\n")).toContain(
       "ggjocahimgaohmigbfhghnlfcnjemagj",
     );
 
@@ -4442,11 +4442,11 @@ describe("Chuck V2 Surface Atlas", () => {
       executionProofs: {
         "claude/web-chat": {
           surface: "claude/web-chat",
+          family: "anthropic",
           successes: 1,
           failures: 0,
           latestStatus: "completed",
           repeatable: true,
-          lastReceiptId: "receipt-claude-pwa",
           lastSuccessAt: "2026-04-28T22:00:00.000Z",
         },
       },
@@ -4454,8 +4454,18 @@ describe("Chuck V2 Surface Atlas", () => {
         "claude/web-chat": {
           surface: "claude/web-chat",
           family: "anthropic",
-          promptDeliveryProof: { verdict: "proved" },
-          answerAttributionProof: { verdict: "proved" },
+          promptDeliveryProof: {
+            verdict: "proved",
+            method: "test",
+            evidence: "prompt delivered",
+            caveats: [],
+          },
+          answerAttributionProof: {
+            verdict: "proved",
+            method: "test",
+            evidence: "answer attributed",
+            caveats: [],
+          },
           extractionMethod: "pwa-ocr",
           receiptSignature: "receipt-claude-pwa",
           receiptEndedAt: "2026-04-28T22:00:00.000Z",
@@ -4504,11 +4514,11 @@ describe("Chuck V2 Surface Atlas", () => {
       executionProofs: {
         "ollama/localhost": {
           surface: "ollama/localhost",
+          family: "sovereign-local",
           successes: 1,
           failures: 0,
           latestStatus: "completed",
           repeatable: true,
-          lastReceiptId: "receipt-ollama",
           lastSuccessAt: "2026-04-28T22:00:00.000Z",
         },
       },
@@ -4516,8 +4526,18 @@ describe("Chuck V2 Surface Atlas", () => {
         "ollama/localhost": {
           surface: "ollama/localhost",
           family: "sovereign-local",
-          promptDeliveryProof: { verdict: "proved" },
-          answerAttributionProof: { verdict: "proved" },
+          promptDeliveryProof: {
+            verdict: "proved",
+            method: "test",
+            evidence: "prompt delivered",
+            caveats: [],
+          },
+          answerAttributionProof: {
+            verdict: "proved",
+            method: "test",
+            evidence: "answer attributed",
+            caveats: [],
+          },
           extractionMethod: "http-json",
           receiptSignature: "receipt-ollama",
           receiptEndedAt: "2026-04-28T22:00:00.000Z",
