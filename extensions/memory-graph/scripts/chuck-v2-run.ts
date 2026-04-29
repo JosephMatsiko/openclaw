@@ -48,6 +48,8 @@ type CliOptions = {
   surfaceAtlas: boolean;
   surfaceAtlasSurface?: string;
   capabilityLedger: boolean;
+  transportAudit: boolean;
+  transportAuditSurface?: string;
   doctor: boolean;
   repoHygiene: boolean;
   repoHygieneCheckpoint: boolean;
@@ -160,6 +162,27 @@ async function main(): Promise<void> {
     if (options.json) {
       console.log(
         JSON.stringify({ ok: true, text, summary, capabilityLedger: ledger.summary }, null, 2),
+      );
+      return;
+    }
+    console.log(text);
+    return;
+  }
+
+  if (options.transportAudit) {
+    const ledger = chuckV2.buildCapabilityLedgerForState({ stateDir });
+    const transportProofs = chuckV2.loadSurfaceTransportProofs({ stateDir });
+    const audit = chuckV2.buildSurfaceTransportAudit({
+      ledger,
+      transportProofs,
+      generatedAt: ledger.generatedAt,
+    });
+    const text = chuckV2.formatSurfaceTransportAudit(audit, {
+      surface: options.transportAuditSurface,
+    });
+    if (options.json) {
+      console.log(
+        JSON.stringify({ ok: true, text, audit, capabilityLedger: ledger.summary }, null, 2),
       );
       return;
     }
@@ -707,6 +730,7 @@ function parseArgs(args: string[]): CliOptions {
     listDocket: false,
     surfaceAtlas: false,
     capabilityLedger: false,
+    transportAudit: false,
     doctor: false,
     repoHygiene: false,
     repoHygieneCheckpoint: false,
@@ -753,6 +777,11 @@ function parseArgs(args: string[]): CliOptions {
       options.surfaceAtlasSurface = args[++i];
     } else if (arg === "--capability-ledger" || arg === "--readiness-board") {
       options.capabilityLedger = true;
+    } else if (arg === "--transport-audit" || arg === "--surface-transport-audit") {
+      options.transportAudit = true;
+    } else if (arg === "--transport-audit-surface") {
+      options.transportAudit = true;
+      options.transportAuditSurface = args[++i];
     } else if (arg === "--doctor") {
       options.doctor = true;
     } else if (arg === "--repo-hygiene" || arg === "--hygiene") {
@@ -1145,6 +1174,7 @@ function printUsage(): void {
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --surface-atlas
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --surface-atlas --surface-atlas-surface perplexity/mac-app
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --capability-ledger
+  node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --transport-audit
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --doctor
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --repo-hygiene
   node --import tsx extensions/memory-graph/scripts/chuck-v2-run.ts --repo-hygiene-checkpoint
@@ -1179,6 +1209,9 @@ Options:
                      Limit --surface-atlas to one surface id.
   --capability-ledger
                      Print the Kernel-derived Fleet Readiness Board.
+  --transport-audit  Print per-surface transport proof gaps: open, mode-switch, prompt delivery, answer attribution, extraction, return.
+  --transport-audit-surface <surface>
+                     Limit --transport-audit to one surface id.
   --doctor           Inspect configured model surfaces and create setup/proof Docket items.
   --repo-hygiene     Classify git dirt and report self-build cleanliness gates.
   --repo-hygiene-checkpoint

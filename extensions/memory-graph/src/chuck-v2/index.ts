@@ -33,6 +33,7 @@ export * from "./scout-resolve.js";
 export * from "./skill-quarantine.js";
 export * from "./stake.js";
 export * from "./surface-atlas.js";
+export * from "./surface-transport-audit.js";
 export * from "./surfaces.js";
 export * from "./trace.js";
 export * from "./types.js";

@@ -237,22 +237,47 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
   {
     surface: "claude/web-chat",
     family: "anthropic",
-    label: "Claude web",
+    label: "Claude web/PWA",
     category: "same-family-surface",
     status: "configured",
-    preferredDriver: "browser-cdp",
-    primaryScript: "extensions/memory-graph/scripts/research-claude-ai-chat.mjs",
-    launchHint: "Shared browser cockpit at claude.ai",
+    preferredDriver: "ocr",
+    primaryScript: "extensions/memory-graph/scripts/research-claude-ai-pwa.mjs",
+    launchHint:
+      "Shared browser cockpit at claude.ai or Claude.ai Chrome PWA bundle com.google.Chrome.app.fmpnliohjhemenmnlpbfagaolkdacoja",
     forms: [
-      form("browser-tab", "automation-substrate", "CDP/DOM extraction and selector proof"),
       form(
         "pwa",
         "human-continuity",
-        "less tab clutter when a stable app-shell session is useful",
-        ["same Anthropic family signal; does not add a family vote"],
+        "Claude.ai installed PWA with chat, projects, code, customize, design, and Max-plan continuity",
+        [
+          "same Anthropic family signal; does not add a family vote",
+          "PWA bundle: com.google.Chrome.app.fmpnliohjhemenmnlpbfagaolkdacoja",
+        ],
       ),
+      form("browser-tab", "automation-substrate", "CDP/DOM extraction and selector proof fallback"),
     ],
     controls: [
+      control("claude-pwa-new-chat", "New chat", "button", "Start a new Claude PWA chat.", {
+        selector: 'a[href*="/new"], button[aria-label*="new chat" i], text: New chat',
+      }),
+      control("claude-pwa-projects", "Projects", "button", "Open Claude Projects.", {
+        selector: 'a[href*="/projects"], button[aria-label*="projects" i], text: Projects',
+      }),
+      control("claude-pwa-code", "Code", "button", "Open Claude Code mode.", {
+        selector: 'a[href*="/code"], button[aria-label*="code" i], text: Code',
+      }),
+      control("claude-pwa-customize", "Customize", "button", "Open Claude Customize mode.", {
+        selector: 'a[href*="/customize"], button[aria-label*="customize" i], text: Customize',
+      }),
+      control(
+        "claude-pwa-design",
+        "Design",
+        "button",
+        "Open Claude Design mode inside the Claude.ai PWA.",
+        {
+          selector: 'a[href*="/design"], button[aria-label*="design" i], text: Design',
+        },
+      ),
       control("claude-model-menu", "Model menu", "selector", "Read or change Claude model.", {
         selector: '[data-testid*="model"], button[aria-haspopup="menu"]',
       }),
@@ -281,18 +306,32 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     ],
     toolRoutes: [
       route(
+        "claude-ai-pwa-driver",
+        "ocr",
+        "node extensions/memory-graph/scripts/research-claude-ai-pwa.mjs",
+        [
+          "Primary Claude.ai PWA transport proof: exact bundle activation, OCR prompt delivery, OCR answer attribution, and workstation return.",
+        ],
+      ),
+      route(
         "research-claude-ai-chat",
         "browser-cdp",
         "node extensions/memory-graph/scripts/research-claude-ai-chat.mjs",
-        ["Browser surface driver."],
+        ["Fallback/browser debugging surface with DOM extraction."],
       ),
     ],
     leasePolicy: WEB_COCKPIT_LEASE,
     knownIssues: [
       "Selectors rotate; use Accessibility/Computer Use fallback if CDP selectors fail.",
+      "Design is a mode inside Claude web/PWA, not an independent Anthropic vote.",
+      "Anthropic may refuse exact-token echo proofs; use benign task evidence for answer attribution.",
     ],
-    masteryGaps: ["Record exact live model picker variants after next successful proof."],
-    notes: ["Same Anthropic family signal only."],
+    masteryGaps: [],
+    notes: [
+      "Same Anthropic family signal only.",
+      "The standalone Claude Design PWA is deprecated in favor of this Claude.ai PWA mode map.",
+      "Live PWA audit on 2026-04-28 proved bundle activation, mode inventory, prompt delivery, OCR answer attribution, and workstation return.",
+    ],
   },
   {
     surface: "claude/mac-app",
@@ -364,54 +403,6 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     notes: ["Same Anthropic family; useful child surface, not another family."],
   },
   {
-    surface: "claude/design",
-    family: "anthropic",
-    label: "Claude Design",
-    category: "future-surface",
-    status: "planned",
-    preferredDriver: "browser-cdp",
-    primaryScript: "extensions/memory-graph/scripts/research-claude-design.mjs",
-    launchHint: "claude.ai/design once installed/enabled",
-    forms: [
-      form("browser-or-pwa", "both", "design-specific Anthropic surface once enabled and proven"),
-    ],
-    controls: [
-      control("claude-design-new", "New design", "button", "Start a new design project.", {
-        selector:
-          '[data-testid*="new-design"], button[aria-label*="new design" i], button/a text: new design/create design',
-      }),
-      control("claude-design-send", "Generate/send", "button", "Submit design prompt.", {
-        selector:
-          'button[aria-label*="generate" i], button[aria-label*="send" i], button[data-testid*="generate"], button[type="submit"]',
-      }),
-      control("claude-design-export", "Export/download", "button", "Export rendered design.", {
-        selector:
-          '[data-testid*="export"], button[aria-label*="export" i], button[data-testid*="download"], button[aria-label*="download" i]',
-      }),
-    ],
-    shortcuts: [shortcut("Enter", "Fallback submit if generate button is not detected.")],
-    abilities: [
-      ability(
-        "ui-design",
-        "UI design surface",
-        "design ideation and exportable artifacts",
-        "can-draft",
-      ),
-    ],
-    toolRoutes: [
-      route(
-        "claude-design-driver",
-        "browser-cdp",
-        "node extensions/memory-graph/scripts/research-claude-design.mjs",
-        ["Planned Claude design surface driver."],
-      ),
-    ],
-    leasePolicy: WEB_COCKPIT_LEASE,
-    knownIssues: ["Design product is new; selectors are intentionally layered and need proof."],
-    masteryGaps: ["Install/enable Claude Design and record repeatable proof."],
-    notes: ["Same Anthropic family."],
-  },
-  {
     surface: "chatgpt/web-chat",
     family: "openai",
     label: "ChatGPT web",
@@ -481,8 +472,8 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       ),
     ],
     leasePolicy: WEB_COCKPIT_LEASE,
-    knownIssues: ["Must be hardened because ChatGPT web covers things Codex CLI cannot."],
-    masteryGaps: ["Repair/prove ChatGPT web driver after latest login/session changes."],
+    knownIssues: ["Must stay hardened because ChatGPT web covers things Codex CLI cannot."],
+    masteryGaps: ["Keep model/mode selector receipts current for ChatGPT web after UI changes."],
     notes: ["Primary OpenAI chat surface when available."],
   },
   {
@@ -548,8 +539,12 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     leasePolicy: APP_LEASE,
     knownIssues: [
       "Coordinate estimates need live verification whenever the window geometry changes.",
+      "Current health probe blocks load-bearing use when Screen Recording is unavailable to the launcher.",
     ],
-    masteryGaps: ["Record stable app geometry and model/mode controls."],
+    masteryGaps: [
+      "Grant/verify Screen Recording or add a non-screenshot extraction path before load-bearing ChatGPT Mac use.",
+      "Record stable app geometry and model/mode controls.",
+    ],
     notes: ["Same OpenAI family; child/cousin surface only."],
   },
   {
@@ -800,7 +795,9 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     knownIssues: [
       "Entitlement is visible caveat unless model selector or successful receipt proves Pro.",
     ],
-    masteryGaps: ["Promote PWA/web path with repeatable Run-button proof and entitlement proof."],
+    masteryGaps: [
+      "Persist Run-button and model-selector entitlement proof after Google UI changes.",
+    ],
     notes: ["Same Google family; useful child surface, not extra vote."],
   },
   {
@@ -811,12 +808,12 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "configured",
     preferredDriver: "computer-use",
     primaryScript: "extensions/memory-graph/scripts/research-perplexity-mac.mjs",
-    launchHint: "Perplexity native Mac app, fullscreen preferred, Incognito singleton lane",
+    launchHint: "Perplexity native Mac app, shared-Max fullscreen Incognito lane",
     forms: [
       form(
         "native-mac-app",
         "both",
-        "shared Perplexity Max account Incognito lane with source-heavy research continuity",
+        "Shared Perplexity Max Incognito lane with source-heavy research continuity",
         ["single active lane policy; reuse during active work instead of closing after each run"],
       ),
     ],
@@ -849,7 +846,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
         "perplexity-incognito",
         "Incognito Mode",
         "toggle",
-        "Verify and enable Incognito before shared-Max native/Comet work.",
+        "Verify and enable Incognito before shared-Max native Perplexity work.",
         {
           coordinate: "922/1470,398/956",
           source: "pixel/OCR verified settings toggle",
@@ -916,11 +913,16 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     leasePolicy: PERPLEXITY_LEASE,
     knownIssues: [
       "Reply extractor can fail even when a visible answer exists; OCR capture is fallback proof until extractor is repaired.",
+      "This is the shared Perplexity Max native route; Chrome perplexity/web is Joseph's personal account unless proven otherwise.",
     ],
     masteryGaps: [
       "Repair answer extraction so visible Perplexity replies become structured receipts automatically.",
+      "Keep account-profile receipts explicit so shared-Max native/Comet and personal Chrome Perplexity are never confused.",
     ],
-    notes: ["Perplexity stays one family and is strongest for evidence-rich/live research."],
+    notes: [
+      "Perplexity stays one family and is strongest for evidence-rich/live research.",
+      "Shared-Max native and Comet are separate child surfaces; they must each prove delivery/attribution before load-bearing use.",
+    ],
   },
   {
     surface: "perplexity/web",
@@ -963,7 +965,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     ],
     leasePolicy: WEB_COCKPIT_LEASE,
     knownIssues: [
-      "Browser profile may be Joseph's personal account rather than the shared Max native/Comet profile.",
+      "Browser profile is currently Joseph's personal Perplexity account (josephmats28602 / josephmatsiko77@gmail.com), not the shared Max native/Comet profile.",
     ],
     masteryGaps: [
       "Tag receipts with the observed account profile; do not assume web profile equals shared Max native/Comet.",
@@ -977,17 +979,44 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     family: "perplexity",
     label: "Perplexity Comet / browser controls",
     category: "same-family-surface",
-    status: "available-tool",
-    preferredDriver: "computer-use",
-    launchHint: "Comet app/browser automation candidate on the shared Perplexity Max profile",
+    status: "configured",
+    preferredDriver: "browser-cdp",
+    primaryScript: "extensions/memory-graph/scripts/research-perplexity-comet.mjs",
+    launchHint: "Comet app next to Perplexity in the Dock; shared Perplexity Max profile",
     forms: [
       form(
         "agentic-browser",
         "both",
         "Perplexity-owned browser/computer-use surface on the shared Max account once admitted",
+        ["bundle id: ai.perplexity.comet"],
       ),
     ],
-    controls: [],
+    controls: [
+      control(
+        "comet-composer",
+        "Composer",
+        "selector",
+        "Primary Perplexity composer inside Comet.",
+        {
+          selector:
+            '#ask-input, div[contenteditable="true"][role="textbox"], textarea[placeholder*="Ask" i], textarea',
+        },
+      ),
+      control(
+        "comet-incognito",
+        "Incognito",
+        "button",
+        "Enable Perplexity Incognito on the shared-Max Comet profile before account-history-sensitive runs.",
+        {
+          selector: 'button[aria-label*="incognito" i], button text:Use incognito',
+          risk: "medium",
+        },
+      ),
+      control("comet-submit", "Submit", "button", "Submit prompt in Comet.", {
+        selector:
+          'button[aria-label*="Submit" i], button[data-testid*="submit"], button[type="submit"]',
+      }),
+    ],
     shortcuts: [],
     abilities: [
       ability(
@@ -998,14 +1027,22 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       ),
     ],
     toolRoutes: [
-      route("future-comet-driver", "computer-use", undefined, [
-        "Operator says Comet is available through the shared Max profile; requires prompt-delivery and answer-attribution proof before load-bearing use.",
-      ]),
+      route(
+        "perplexity-comet-driver",
+        "browser-cdp",
+        "node extensions/memory-graph/scripts/research-perplexity-comet.mjs",
+        [
+          "Shared-Max Comet driver; must prove prompt delivery and answer attribution independently from Perplexity.app.",
+        ],
+      ),
     ],
     leasePolicy: PERPLEXITY_LEASE,
-    knownIssues: ["No current repeatable Comet runner proof in Chuck."],
+    knownIssues: [
+      "Comet has its own prompt-delivery and answer-attribution proof; keep drift probes current because the UI is young.",
+    ],
     masteryGaps: [
-      "Build/verify Comet driver, prove shared-Max session, then calibrate as same-family Perplexity child.",
+      "Keep shared-Max account/profile proof fresh for Comet Incognito leases.",
+      "Add task-class calibration for Comet browser-agent actions beyond source-heavy research.",
     ],
     notes: [
       "Important available Perplexity child surface; it does not add an independent family vote.",
@@ -1018,10 +1055,12 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     category: "fleet-surface",
     status: "configured",
     preferredDriver: "browser-cdp",
-    launchHint: "Grok web/app when logged in",
+    launchHint: "Grok Chrome PWA at ~/Applications/Chrome Apps.localized/Grok.app",
     forms: [
       form("browser-tab", "automation-substrate", "CDP proof against grok.com or X/Grok web"),
-      form("pwa", "human-continuity", "X/Grok app-shell continuity for live-social context"),
+      form("pwa", "human-continuity", "Grok PWA shell for live-social context", [
+        "bundle id: com.google.Chrome.app.ggjocahimgaohmigbfhghnlfcnjemagj",
+      ]),
     ],
     controls: [
       control(
@@ -1052,8 +1091,9 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     leasePolicy: WEB_COCKPIT_LEASE,
     knownIssues: [
       "Candidate until runner attribution and subscription/app access are repeatably proven.",
+      "PWA may trigger macOS per-controller Accessibility prompts; GUI runs must hold the global surface lock before activation.",
     ],
-    masteryGaps: ["Implement/prove driver, then calibrate by task class."],
+    masteryGaps: ["Calibrate Grok by task class, especially X/Twitter-native current-signal work."],
     notes: ["xAI can be a full family only after proof/calibration."],
   },
   {
@@ -1064,6 +1104,7 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     status: "configured",
     preferredDriver: "cli",
     launchHint: "local model runtime if installed and intentionally enabled",
+    forms: [form("local-runtime", "automation-substrate", "bounded local HTTP/CLI runner")],
     controls: [
       control(
         "local-model-command",
@@ -1140,7 +1181,9 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
     ],
     leasePolicy: NO_LEASE,
     knownIssues: ["Skills/plugins need sandbox quarantine before trust."],
-    masteryGaps: ["Finish durable command registration proof in the live OpenClaw app."],
+    masteryGaps: [
+      "Promote dev-gateway /chuck proof into the normal always-on OpenClaw channel profile.",
+    ],
     notes: ["OpenClaw is the body/channels; Chuck is the governor."],
   },
   {
@@ -1182,8 +1225,14 @@ const BASE_ATLAS: SurfaceAtlasEntry[] = [
       ]),
     ],
     leasePolicy: APP_LEASE,
-    knownIssues: ["Must never become unlogged external account action."],
-    masteryGaps: ["Codify per-app fallback recipes after each manual rescue."],
+    knownIssues: [
+      "Must never become unlogged external account action.",
+      "Current Computer Use MCP proof is blocked by app safety policy and Apple event permission errors in this session.",
+    ],
+    masteryGaps: [
+      "Repair Computer Use permissions/app routing or keep it explicitly blocked while deterministic app drivers do the work.",
+      "Codify per-app fallback recipes after each manual rescue.",
+    ],
     notes: ["This is the general-purpose hand, not an evidence source by itself."],
   },
   {

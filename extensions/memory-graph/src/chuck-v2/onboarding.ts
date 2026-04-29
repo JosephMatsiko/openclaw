@@ -476,9 +476,12 @@ export function familyMemberSurfaceCatalog(
     {
       family: "anthropic",
       surface: "claude/web-chat",
-      label: "Claude web",
+      label: "Claude web/PWA",
       role: "child",
-      notes: ["browser fallback; same Anthropic family"],
+      notes: [
+        "browser/PWA fallback; same Anthropic family",
+        "installed Claude.ai PWA includes chat, projects, code, customize, and design modes",
+      ],
     },
     {
       family: "anthropic",
@@ -489,10 +492,13 @@ export function familyMemberSurfaceCatalog(
     },
     {
       family: "anthropic",
-      surface: "claude/artifacts-design",
-      label: "Claude artifacts/design",
+      surface: "claude/web-chat#design-mode",
+      label: "Claude Design mode",
       role: "cousin",
-      notes: ["specialized creation surface; same Anthropic family"],
+      notes: [
+        "specialized creation mode inside Claude web/PWA",
+        "not a separate family vote and not the deprecated standalone Claude Design PWA",
+      ],
     },
     {
       family: "openai",

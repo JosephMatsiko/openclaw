@@ -19,6 +19,7 @@ import {
   buildSkillQuarantinePlan,
   buildContrarianDeepenPrompt,
   buildCapabilityLedger,
+  buildSurfaceTransportAudit,
   buildOllamaScoutPrompt,
   canEnableSkill,
   canUseExternalSurface,
@@ -54,6 +55,7 @@ import {
   createIntentAnchor,
   createOllamaRunnerAdapter,
   createOperatorSurfaceProfile,
+  createPerplexityCometRunnerAdapter,
   createPerplexityMacRunnerAdapter,
   createPerplexitySessionLease,
   createTaskCapsule,
@@ -114,6 +116,8 @@ import {
   repoHygieneLaneManifests,
   listOllamaLocalModelCandidates,
   loadRunnerSurfaceProofs,
+  loadSurfaceProofDetails,
+  loadSurfaceTransportProofs,
   readFleetTrace,
   readDocketItems,
   receiptCountsForFamily,
@@ -131,6 +135,7 @@ import {
   surfaceAtlasEntries,
   surfaceAtlasEntry,
   surfaceAtlasSummary,
+  surfaceTransportAuditEntry,
   surfaceReceiptsFromRunnerReceipts,
   summarizeReceiptInvariants,
   validateFleet,
@@ -434,7 +439,11 @@ describe("Chuck V2 config", () => {
       "chatgpt/mac-app",
     ]);
     expect(googleSurfaces).toEqual(["gemini/cli", "gemini/web-chat", "aistudio/web"]);
-    expect(perplexitySurfaces).toEqual(["perplexity/mac-app", "perplexity/web"]);
+    expect(perplexitySurfaces).toEqual([
+      "perplexity/mac-app",
+      "perplexity/web",
+      "perplexity/comet",
+    ]);
     expect(validateFleet(config.fleet)).toMatchObject({
       ok: true,
       repeatedFamilies: ["anthropic", "openai", "google", "perplexity"],
@@ -2047,6 +2056,22 @@ describe("Chuck V2 runnable loop", () => {
     });
   });
 
+  test("runner calibration accepts OCR-normalized Claude surface proof answers", () => {
+    const calibration = calibrateRunnerOutput({
+      family: "anthropic",
+      surface: "claude/web-chat",
+      prompt: "Reply with exactly one short sentence containing SURFACE_PROOF_OK.",
+      text: "SURFACE PROOF OIC- sealed Scout pass acknowledged, no tools accessed.",
+    });
+
+    expect(calibration).toMatchObject({
+      verdict: "usable",
+      formatCompliant: true,
+      roleplayDriftDetected: false,
+      reasons: [],
+    });
+  });
+
   test("Ollama scout wrapper forces local diagnostic structure", () => {
     const prompt = buildOllamaScoutPrompt("diagnose the local model");
     expect(prompt).toContain("technical evaluation pass");
@@ -2121,6 +2146,7 @@ describe("Chuck V2 runnable loop", () => {
       "aistudio/web",
       "perplexity/mac-app",
       "perplexity/web",
+      "perplexity/comet",
       "grok/web-or-app",
     ]);
   });
@@ -2616,6 +2642,7 @@ describe("Chuck V2 runnable loop", () => {
     const geminiCalls: Array<{ command: string; args: string[]; stdin?: string }> = [];
     const grokCalls: Array<{ command: string; args: string[]; stdin?: string }> = [];
     const perplexityCalls: Array<{ command: string; args: string[]; stdin?: string }> = [];
+    const cometCalls: Array<{ command: string; args: string[]; stdin?: string }> = [];
     const chatGpt = createChatGptWebRunnerAdapter({
       command: "fake-node",
       scriptPath: "/tmp/research-chatgpt-chat.mjs",
@@ -2645,11 +2672,14 @@ describe("Chuck V2 runnable loop", () => {
     });
     const claudeWeb = createClaudeWebRunnerAdapter({
       command: "fake-node",
-      scriptPath: "/tmp/research-claude-ai-chat.mjs",
+      scriptPath: "/tmp/research-claude-ai-pwa.mjs",
       spawnImpl: fakeSpawn({
         stdout: JSON.stringify({
           text: structuredScoutText("claude web scout"),
-          modelUsed: "claude/web",
+          modelUsed: "claude-ai/pwa",
+          promptDeliveryProof: { verdict: "proved", method: "pwa-ocr" },
+          answerAttributionProof: { verdict: "proved", method: "pwa-ocr" },
+          extractionMethod: "pwa-ocr",
         }),
         calls: claudeWebCalls,
       }),
@@ -2658,7 +2688,19 @@ describe("Chuck V2 runnable loop", () => {
       command: "fake-node",
       scriptPath: "/tmp/research-claude-mac.mjs",
       spawnImpl: fakeSpawn({
-        stdout: structuredScoutText("claude mac scout"),
+        stdout: JSON.stringify({
+          text: structuredScoutText("claude mac scout"),
+          modelUsed: "claude/mac-app",
+          transportProofs: [
+            {
+              surface: "claude/mac-app",
+              criterion: "mode-switch",
+              verdict: "proved",
+              method: "native-ocr-mode-map",
+              evidence: "screen: chat-home",
+            },
+          ],
+        }),
         calls: claudeMacCalls,
       }),
     });
@@ -2688,8 +2730,41 @@ describe("Chuck V2 runnable loop", () => {
       command: "fake-node",
       scriptPath: "/tmp/research-perplexity-mac.mjs",
       spawnImpl: fakeSpawn({
-        stdout: structuredScoutText("perplexity scout"),
+        stdout: JSON.stringify({
+          text: structuredScoutText("perplexity scout"),
+          modelUsed: "perplexity/mac-app (mode=research; incognito)",
+          transportProofs: [
+            {
+              surface: "perplexity/mac-app",
+              criterion: "mode-switch",
+              verdict: "proved",
+              method: "native-coordinate-mode-and-incognito-settings",
+              evidence: "mode=research; incognito=verified",
+            },
+          ],
+        }),
         calls: perplexityCalls,
+      }),
+    });
+    const comet = createPerplexityCometRunnerAdapter({
+      command: "fake-node",
+      scriptPath: "/tmp/research-perplexity-comet.mjs",
+      spawnImpl: fakeSpawn({
+        stdout: JSON.stringify({
+          text: structuredScoutText("perplexity comet scout"),
+          modelUsed: "perplexity/comet-shared-max",
+          authProfileId: "perplexity-shared-max-comet-visible",
+          transportProofs: [
+            {
+              surface: "perplexity/comet",
+              criterion: "answer-attribution",
+              verdict: "proved",
+              method: "comet-dom-latest-answer-after-submit",
+              evidence: "answerCount advanced",
+            },
+          ],
+        }),
+        calls: cometCalls,
       }),
     });
     const result = await runChuckLoop({
@@ -2709,13 +2784,24 @@ describe("Chuck V2 runnable loop", () => {
           "claude/mac-app",
           "gemini/web-chat",
           "perplexity/mac-app",
+          "perplexity/comet",
           "grok/web-or-app",
         ].includes(task.surface),
       ),
     };
     const execution = await executeFleetDispatchPlan({
       dispatchPlan: plan,
-      adapters: [chatGpt, chatGptMac, codexReview, claudeWeb, claudeMac, gemini, grok, perplexity],
+      adapters: [
+        chatGpt,
+        chatGptMac,
+        codexReview,
+        claudeWeb,
+        claudeMac,
+        gemini,
+        grok,
+        perplexity,
+        comet,
+      ],
       signingSecret: SECRET,
     });
 
@@ -2734,6 +2820,7 @@ describe("Chuck V2 runnable loop", () => {
         ["anthropic", "claude-mac-primary", "claude/mac-app"],
         ["google", "gemini-web-primary", "gemini/web-chat"],
         ["perplexity", "perplexity-mac-primary", "perplexity/mac-app"],
+        ["perplexity", "perplexity-comet-primary", "perplexity/comet"],
         ["xai", "grok-web-primary", "grok/web-or-app"],
       ]),
     );
@@ -2752,16 +2839,11 @@ describe("Chuck V2 runnable loop", () => {
     expect(codexReviewCalls[0]?.stdin).toContain("same-family review surface");
     expect(claudeWebCalls[0]).toMatchObject({
       command: "fake-node",
-      args: expect.arrayContaining([
-        "/tmp/research-claude-ai-chat.mjs",
-        "--ask",
-        "--json",
-        "--web-only",
-      ]),
+      args: expect.arrayContaining(["/tmp/research-claude-ai-pwa.mjs", "--json", "--prompt"]),
     });
     expect(claudeMacCalls[0]).toMatchObject({
       command: "fake-node",
-      args: expect.arrayContaining(["/tmp/research-claude-mac.mjs", "--prompt"]),
+      args: expect.arrayContaining(["/tmp/research-claude-mac.mjs", "--json", "--prompt"]),
     });
     expect(geminiCalls[0]).toMatchObject({
       command: "fake-node",
@@ -2780,10 +2862,21 @@ describe("Chuck V2 runnable loop", () => {
         "/tmp/research-perplexity-mac.mjs",
         "--mode",
         "research",
+        "--json",
         "--prompt",
       ]),
     });
     expect(perplexityCalls[0]?.args.join("\n")).toContain("Do not use tools. Do not inspect files");
+    expect(cometCalls[0]).toMatchObject({
+      command: "fake-node",
+      args: expect.arrayContaining([
+        "/tmp/research-perplexity-comet.mjs",
+        "--ask",
+        "--json",
+        "--prompt",
+      ]),
+    });
+    expect(cometCalls[0]?.args.join("\n")).toContain("Do not use tools. Do not inspect files");
   });
 
   test("runner timeout budgets are dynamic by surface and prompt size", () => {
@@ -3162,6 +3255,42 @@ describe("Chuck V2 model doctor", () => {
     ]);
   });
 
+  test("doctor maps Perplexity Comet to the shared Perplexity health probe", () => {
+    const report = runModelDoctor({
+      config: configWithSafeCliScoutSurfaces(),
+      generatedAt: "2026-04-27T00:00:00.000Z",
+      executionProofs: {
+        "perplexity/comet": {
+          surface: "perplexity/comet",
+          family: "perplexity",
+          successes: 1,
+          failures: 1,
+          latestStatus: "completed",
+          lastSuccessAt: "2026-04-27T00:00:00.000Z",
+          repeatable: false,
+        },
+      },
+      health: {
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        workers: {
+          perplexity: { worker: "perplexity", healthy: true },
+        },
+      },
+    });
+
+    expect(
+      workerProbeNamesForConfig(configWithSafeCliScoutSurfaces()).filter((name) =>
+        name.includes("perplexity"),
+      ),
+    ).toEqual(["perplexity"]);
+    expect(report.rows.find((row) => row.surface === "perplexity/comet")).toMatchObject({
+      status: "ready",
+      executionStatus: "provisional",
+      healthKey: "perplexity",
+      countsAsLoadBearingFamily: false,
+    });
+  });
+
   test("doctor distinguishes ready, unknown, and blocked families", () => {
     const report = runModelDoctor({
       generatedAt: "2026-04-27T00:00:00.000Z",
@@ -3340,7 +3469,13 @@ describe("Chuck V2 model doctor", () => {
           createPerplexityMacRunnerAdapter({
             command: "fake-node",
             scriptPath: "/tmp/research-perplexity-mac.mjs",
-            spawnImpl: fakeSpawn({ stdout: structuredScoutText("perplexity proof"), calls: [] }),
+            spawnImpl: fakeSpawn({
+              stdout: JSON.stringify({
+                text: structuredScoutText("perplexity proof"),
+                modelUsed: "perplexity/mac-app (mode=research; incognito)",
+              }),
+              calls: [],
+            }),
           }),
         ],
         signingSecret: SECRET,
@@ -4244,25 +4379,49 @@ describe("Chuck V2 Surface Atlas", () => {
         "perplexity-mode-research",
       ]),
     );
-    expect(perplexity?.forms?.[0]?.bestFor).toContain("shared Perplexity Max account");
-    expect(perplexity?.masteryGaps.join("\n")).toContain("Repair answer extraction");
+    expect(perplexity?.forms?.[0]?.bestFor).toContain("Shared Perplexity Max");
+    expect(perplexity?.knownIssues.join("\n")).toContain("shared Perplexity Max native route");
+    expect(perplexity?.masteryGaps.join("\n")).toContain("account-profile receipts");
 
     const perplexityWeb = surfaceAtlasEntry("perplexity/web");
-    expect(perplexityWeb?.knownIssues.join("\n")).toContain("personal account");
+    expect(perplexityWeb?.knownIssues.join("\n")).toContain("personal Perplexity account");
 
     const comet = surfaceAtlasEntry("perplexity/comet");
     expect(comet).toMatchObject({
       category: "same-family-surface",
-      status: "available-tool",
-      preferredDriver: "computer-use",
+      status: "configured",
+      preferredDriver: "browser-cdp",
+      primaryScript: "extensions/memory-graph/scripts/research-perplexity-comet.mjs",
     });
+    expect(comet?.forms?.[0]?.caveats?.join("\n")).toContain("ai.perplexity.comet");
+    expect(comet?.controls.map((control) => control.id)).toEqual(
+      expect.arrayContaining(["comet-composer", "comet-incognito", "comet-submit"]),
+    );
     expect(comet?.notes.join("\n")).toContain("does not add an independent family vote");
+
+    const grok = surfaceAtlasEntry("grok/web-or-app");
+    expect(grok?.forms.find((form) => form.kind === "pwa")?.caveats?.join("\n")).toContain(
+      "ggjocahimgaohmigbfhghnlfcnjemagj",
+    );
 
     const claudeMac = surfaceAtlasEntry("claude/mac-app");
     expect(claudeMac?.forms?.map((form) => form.kind)).toContain("native-mac-app");
     expect(claudeMac?.controls.map((control) => control.id)).toEqual(
       expect.arrayContaining(["claude-mode-chat", "claude-mode-cowork", "claude-mode-code"]),
     );
+
+    const claudeAi = surfaceAtlasEntry("claude/web-chat");
+    expect(claudeAi).toMatchObject({
+      label: "Claude web/PWA",
+      preferredDriver: "ocr",
+      primaryScript: "extensions/memory-graph/scripts/research-claude-ai-pwa.mjs",
+    });
+    expect(claudeAi?.forms?.[0]?.kind).toBe("pwa");
+    expect(claudeAi?.toolRoutes.map((route) => route.route)).toEqual(
+      expect.arrayContaining(["claude-ai-pwa-driver", "research-claude-ai-chat"]),
+    );
+    expect(claudeAi?.knownIssues.join("\n")).toContain("exact-token echo proofs");
+    expect(claudeAi?.masteryGaps).toEqual([]);
 
     const toolSurfaces = surfaceAtlasEntries().filter(
       (entry) => entry.category === "tool-surface" || entry.category === "connector",
@@ -4276,6 +4435,289 @@ describe("Chuck V2 Surface Atlas", () => {
         "google-drive/connector",
       ]),
     );
+  });
+
+  test("builds a transport audit for every atlas surface without treating fallback transports as duplicate family members", () => {
+    const ledger = buildCapabilityLedger({
+      executionProofs: {
+        "claude/web-chat": {
+          surface: "claude/web-chat",
+          successes: 1,
+          failures: 0,
+          latestStatus: "completed",
+          repeatable: true,
+          lastReceiptId: "receipt-claude-pwa",
+          lastSuccessAt: "2026-04-28T22:00:00.000Z",
+        },
+      },
+      proofDetails: {
+        "claude/web-chat": {
+          surface: "claude/web-chat",
+          family: "anthropic",
+          promptDeliveryProof: { verdict: "proved" },
+          answerAttributionProof: { verdict: "proved" },
+          extractionMethod: "pwa-ocr",
+          receiptSignature: "receipt-claude-pwa",
+          receiptEndedAt: "2026-04-28T22:00:00.000Z",
+          proofModel: "split",
+        },
+      },
+    });
+    const audit = buildSurfaceTransportAudit({
+      ledger,
+      generatedAt: "2026-04-28T00:00:00.000Z",
+      transportProofs: {
+        "claude/web-chat": {
+          "mode-switch": {
+            surface: "claude/web-chat",
+            criterion: "mode-switch",
+            verdict: "proved",
+            method: "pwa-ocr-mode-map",
+            evidence: "visible modes: Code, Customize, Design",
+            checkedAt: "2026-04-28T22:00:00.000Z",
+          },
+        },
+      },
+    });
+    const claudeAi = surfaceTransportAuditEntry("claude/web-chat", audit);
+    expect(claudeAi).toMatchObject({
+      surface: "claude/web-chat",
+      primaryTransport: "pwa",
+      readiness: "load-bearing",
+    });
+    expect(claudeAi?.fallbackTransports).toContain("browser-tab");
+    expect(claudeAi?.requiredProofs).toEqual(
+      expect.arrayContaining([
+        "open-target",
+        "mode-switch",
+        "prompt-delivery",
+        "answer-attribution",
+        "result-extraction",
+        "workstation-return",
+      ]),
+    );
+    expect(claudeAi?.gaps).toEqual([]);
+  });
+
+  test("transport audit does not require mode switching for command-only local model surfaces", () => {
+    const ledger = buildCapabilityLedger({
+      executionProofs: {
+        "ollama/localhost": {
+          surface: "ollama/localhost",
+          successes: 1,
+          failures: 0,
+          latestStatus: "completed",
+          repeatable: true,
+          lastReceiptId: "receipt-ollama",
+          lastSuccessAt: "2026-04-28T22:00:00.000Z",
+        },
+      },
+      proofDetails: {
+        "ollama/localhost": {
+          surface: "ollama/localhost",
+          family: "sovereign-local",
+          promptDeliveryProof: { verdict: "proved" },
+          answerAttributionProof: { verdict: "proved" },
+          extractionMethod: "http-json",
+          receiptSignature: "receipt-ollama",
+          receiptEndedAt: "2026-04-28T22:00:00.000Z",
+          proofModel: "split",
+        },
+      },
+    });
+    const audit = buildSurfaceTransportAudit({ ledger, generatedAt: "2026-04-28T00:00:00.000Z" });
+    const local = surfaceTransportAuditEntry("ollama/localhost", audit);
+
+    expect(local).toMatchObject({
+      primaryTransport: "local-runtime",
+      proofGrade: "load-bearing",
+      gaps: [],
+    });
+    expect(local?.requiredProofs).not.toContain("mode-switch");
+  });
+
+  test("loads durable transport proofs from runner execution artifacts", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "chuck-transport-proof-"));
+    const runnerDir = join(stateDir, "runner-executions");
+    await mkdir(runnerDir, { recursive: true });
+    await writeFile(
+      join(runnerDir, "claude-pwa.json"),
+      JSON.stringify(
+        {
+          executions: [
+            {
+              surface: "claude/web-chat",
+              status: "completed",
+              transportProofs: [
+                {
+                  surface: "claude/web-chat",
+                  criterion: "mode-switch",
+                  verdict: "proved",
+                  method: "pwa-ocr-mode-map",
+                  evidence: "visible modes: Code, Customize, Design",
+                  checkedAt: "2026-04-28T22:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    try {
+      const proofs = loadSurfaceTransportProofs({ stateDir });
+      expect(proofs["claude/web-chat"]?.["mode-switch"]).toMatchObject({
+        verdict: "proved",
+        method: "pwa-ocr-mode-map",
+      });
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  test("manual connector proofs promote connector capability without family-count inflation", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "chuck-connector-proof-"));
+    const proofDir = join(stateDir, "surface-proof-details");
+    const transportDir = join(stateDir, "surface-transport-proofs");
+    const checkedAt = "2026-04-28T23:00:00.000Z";
+    const proofRecord = {
+      verdict: "proved",
+      method: "github-connector-profile",
+      evidence: "GitHub connector returned authenticated operator profile",
+      caveats: [],
+      checkedAt,
+    };
+    await mkdir(proofDir, { recursive: true });
+    await mkdir(transportDir, { recursive: true });
+    await writeFile(
+      join(proofDir, "github-connector.json"),
+      JSON.stringify(
+        {
+          surface: "github/connector",
+          family: "connector",
+          promptDeliveryProof: proofRecord,
+          answerAttributionProof: proofRecord,
+          extractionMethod: "connector",
+          receiptSignature: "manual-github-connector",
+          receiptEndedAt: checkedAt,
+          proofModel: "split",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await writeFile(
+      join(transportDir, "github-connector.json"),
+      JSON.stringify(
+        {
+          proofs: ["open-target", "prompt-delivery", "answer-attribution", "result-extraction"].map(
+            (criterion) => ({
+              surface: "github/connector",
+              criterion,
+              verdict: "proved",
+              method: "github-connector-profile",
+              evidence: "GitHub connector returned authenticated operator profile",
+              checkedAt,
+            }),
+          ),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const proofDetails = loadSurfaceProofDetails({ stateDir });
+      const transportProofs = loadSurfaceTransportProofs({ stateDir });
+      const ledger = buildCapabilityLedger({
+        proofDetails,
+        generatedAt: "2026-04-28T23:00:01.000Z",
+      });
+      const github = ledger.entries.find((entry) => entry.surface === "github/connector");
+      const audit = buildSurfaceTransportAudit({
+        ledger,
+        transportProofs,
+        generatedAt: "2026-04-28T23:00:01.000Z",
+      });
+
+      expect(github).toMatchObject({
+        family: "connector",
+        readiness: "load-bearing",
+        extractionMethod: "connector",
+        countsAsIndependentFamily: false,
+        canCountForFamily: false,
+      });
+      expect(surfaceTransportAuditEntry("github/connector", audit)).toMatchObject({
+        proofGrade: "load-bearing",
+        gaps: [],
+      });
+      expect(ledger.summary.independentLoadBearingFamilies).not.toContain("connector");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  test("manual failed connector proofs block load-bearing connector use", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "chuck-connector-failed-proof-"));
+    const proofDir = join(stateDir, "surface-proof-details");
+    const checkedAt = "2026-04-28T23:05:00.000Z";
+    const failedProof = {
+      verdict: "failed",
+      method: "calendar-connector-profile",
+      evidence: "Calendar connector returned 401 reauthentication required",
+      caveats: ["reauthentication required"],
+      checkedAt,
+    };
+    await mkdir(proofDir, { recursive: true });
+    await writeFile(
+      join(proofDir, "google-calendar-connector.json"),
+      JSON.stringify(
+        {
+          surface: "google-calendar/connector",
+          family: "connector",
+          promptDeliveryProof: failedProof,
+          answerAttributionProof: failedProof,
+          extractionMethod: "unknown",
+          receiptSignature: "manual-google-calendar-connector-failed",
+          receiptEndedAt: checkedAt,
+          proofModel: "split",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const ledger = buildCapabilityLedger({
+        proofDetails: loadSurfaceProofDetails({ stateDir }),
+        generatedAt: "2026-04-28T23:05:01.000Z",
+      });
+      const calendar = ledger.entries.find(
+        (entry) => entry.surface === "google-calendar/connector",
+      );
+      const audit = buildSurfaceTransportAudit({
+        ledger,
+        generatedAt: "2026-04-28T23:05:01.000Z",
+      });
+
+      expect(calendar).toMatchObject({
+        readiness: "blocked",
+        extractionMethod: "unknown",
+        failureMode: "Calendar connector returned 401 reauthentication required",
+      });
+      expect(calendar?.nextRepairAction).toContain("Repair failed split proof");
+      expect(surfaceTransportAuditEntry("google-calendar/connector", audit)?.nextAction).toContain(
+        "401 reauthentication required",
+      );
+      expect(canKernelRelyOn(calendar!, "factual", "high-mutating").allowed).toBe(false);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   test("formats an operator-readable atlas report without hiding proof gaps", () => {

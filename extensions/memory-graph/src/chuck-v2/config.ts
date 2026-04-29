@@ -56,7 +56,7 @@ export const DEFAULT_CHUCK_CONFIG: ChuckConfig = {
       voice: "perplexity-mac",
       surface: "perplexity/mac-app",
       rationale:
-        "Perplexity Max Mac app surface; strongest on source-grounded tasks and governed by its app protocol.",
+        "Shared Perplexity Max Mac app surface; useful on source-grounded tasks and account-profile-tagged separately from personal Chrome Perplexity.",
       capabilityProfile: "meta-router",
       commercialPolicy: "subscription-only",
       quotaPolicy: "normal",
@@ -156,6 +156,7 @@ export function configWithSafeCliScoutSurfaces(
     ["google", "gemini/web-chat"],
     ["google", "aistudio/web"],
     ["perplexity", "perplexity/web"],
+    ["perplexity", "perplexity/comet"],
   ].every(([family, surface]) => hasSurface(family as ChuckFamily, surface));
   if (hasAllConfiguredMembers) {
     return config;
@@ -251,6 +252,14 @@ export function configWithSafeCliScoutSurfaces(
       surface: "perplexity/web",
       rationale:
         "Perplexity browser surface; same Perplexity family signal and account-profile-sensitive fallback. May be Joseph's personal web account rather than the shared Max native/Comet profile, so receipts must tag observed profile and it never adds an independent family vote.",
+      capabilityProfile: "meta-router",
+    },
+    {
+      ...(perplexityBase ?? perplexityDefaults),
+      voice: "perplexity-comet",
+      surface: "perplexity/comet",
+      rationale:
+        "Perplexity Comet shared-Max browser surface; same Perplexity family signal for source-heavy/browser-native work. It is a child/cousin surface, never an additional independent family vote.",
       capabilityProfile: "meta-router",
     },
   ];

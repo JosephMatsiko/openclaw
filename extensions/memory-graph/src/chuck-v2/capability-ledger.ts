@@ -43,8 +43,11 @@ export type SurfaceExtractionMethod =
   | "cli-stdout"
   | "driver-json"
   | "app-driver-text"
+  | "pwa-ocr"
   | "ocr-recovery"
   | "legacy-runner-receipt"
+  | "connector"
+  | "external"
   | "unknown";
 
 export type SurfaceProofRecord = {
@@ -57,7 +60,7 @@ export type SurfaceProofRecord = {
 
 export type SurfaceProofDetail = {
   surface: string;
-  family: ChuckFamily;
+  family: SurfaceAtlasFamily;
   promptDeliveryProof: SurfaceProofRecord;
   answerAttributionProof: SurfaceProofRecord;
   extractionMethod: SurfaceExtractionMethod;
@@ -235,9 +238,12 @@ export function ledgerEntryForSurface(
     ? activeLateRecovery.label
     : executionProof?.latestStatus === "failed"
       ? (executionProof.lastFailureReason ?? "latest proof failed")
-      : doctorRow?.status === "blocked"
-        ? doctorRow.healthReason
-        : undefined;
+      : proofDetail?.proofModel === "split" &&
+          (promptDeliveryProof.verdict === "failed" || answerAttributionProof.verdict === "failed")
+        ? (answerAttributionProof.evidence ?? promptDeliveryProof.evidence ?? "split proof failed")
+        : doctorRow?.status === "blocked"
+          ? doctorRow.healthReason
+          : undefined;
   const readiness = readinessForSurface({
     atlasEntry,
     doctorRow,
@@ -443,10 +449,11 @@ export function loadSurfaceProofDetails({
   stateDir?: string;
 } = {}): Record<string, SurfaceProofDetail> {
   const dir = join(stateDir, "runner-executions");
-  if (!existsSync(dir)) {
-    return {};
-  }
   const details = new Map<string, SurfaceProofDetail>();
+  loadManualSurfaceProofDetails({ stateDir, details });
+  if (!existsSync(dir)) {
+    return Object.fromEntries(details);
+  }
   const files = readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .map((name) => {
@@ -499,6 +506,86 @@ export function loadSurfaceProofDetails({
     }
   }
   return Object.fromEntries(details);
+}
+
+function loadManualSurfaceProofDetails({
+  stateDir,
+  details,
+}: {
+  stateDir: string;
+  details: Map<string, SurfaceProofDetail>;
+}) {
+  const manualDir = join(stateDir, "surface-proof-details");
+  if (!existsSync(manualDir)) {
+    return;
+  }
+  const files = readdirSync(manualDir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => {
+      const path = join(manualDir, name);
+      return { path, name, mtimeMs: statSync(path).mtimeMs };
+    })
+    .toSorted((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+  for (const file of files) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(file.path, "utf8")) as unknown;
+    } catch {
+      continue;
+    }
+    const candidates = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { proofDetails?: unknown }).proofDetails)
+        ? (parsed as { proofDetails: unknown[] }).proofDetails
+        : [parsed];
+    for (const candidate of candidates) {
+      if (isSurfaceProofDetail(candidate)) {
+        details.set(candidate.surface, candidate);
+      }
+    }
+  }
+}
+
+function isSurfaceProofDetail(value: unknown): value is SurfaceProofDetail {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const proof = value as Partial<SurfaceProofDetail>;
+  return (
+    typeof proof.surface === "string" &&
+    typeof proof.family === "string" &&
+    isSurfaceProofRecord(proof.promptDeliveryProof) &&
+    isSurfaceProofRecord(proof.answerAttributionProof) &&
+    isSurfaceExtractionMethod(proof.extractionMethod) &&
+    (proof.proofModel === "split" || proof.proofModel === "legacy")
+  );
+}
+
+function isSurfaceProofRecord(value: unknown): value is SurfaceProofRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const proof = value as Partial<SurfaceProofRecord>;
+  return (
+    (proof.verdict === "proved" || proof.verdict === "missing" || proof.verdict === "failed") &&
+    typeof proof.method === "string" &&
+    typeof proof.evidence === "string"
+  );
+}
+
+function isSurfaceExtractionMethod(value: unknown): value is SurfaceExtractionMethod {
+  return (
+    value === "http-json" ||
+    value === "cli-stdout" ||
+    value === "driver-json" ||
+    value === "app-driver-text" ||
+    value === "pwa-ocr" ||
+    value === "ocr-recovery" ||
+    value === "legacy-runner-receipt" ||
+    value === "connector" ||
+    value === "external" ||
+    value === "unknown"
+  );
 }
 
 export function loadLateSurfaceRecoveries({
@@ -640,13 +727,20 @@ function readinessForSurface({
   if (executionProof?.latestStatus === "failed") {
     return "degraded";
   }
+  if (
+    proofDetail?.proofModel === "split" &&
+    (promptDeliveryProof.verdict === "failed" || answerAttributionProof.verdict === "failed")
+  ) {
+    return "blocked";
+  }
   const promptOk = promptDeliveryProof.verdict === "proved";
   const answerOk = answerAttributionProof.verdict === "proved";
   if (
     promptOk &&
     answerOk &&
     proofDetail?.proofModel === "split" &&
-    executionProof?.latestStatus === "completed"
+    (executionProof?.latestStatus === "completed" || isConnectorOrToolSurface(atlasEntry)) &&
+    proofDetail.extractionMethod !== "unknown"
   ) {
     return "load-bearing";
   }
@@ -670,6 +764,14 @@ function readinessForSurface({
     return "provisional";
   }
   return "blocked";
+}
+
+function isConnectorOrToolSurface(atlasEntry?: SurfaceAtlasEntry): boolean {
+  return (
+    atlasEntry?.category === "connector" ||
+    atlasEntry?.category === "tool-surface" ||
+    atlasEntry?.category === "local-runtime"
+  );
 }
 
 function assignIndependentFamilyCounts(
@@ -818,6 +920,14 @@ function nextRepairActionForSurface({
       surface +
       " to capture split prompt-delivery and answer-attribution proof."
     );
+  }
+  if (
+    proofDetail.promptDeliveryProof.verdict === "failed" ||
+    proofDetail.answerAttributionProof.verdict === "failed"
+  ) {
+    return `Repair failed split proof for ${surface}: ${
+      proofDetail.answerAttributionProof.evidence || proofDetail.promptDeliveryProof.evidence
+    }`;
   }
   if (executionProof?.latestStatus === "failed") {
     return executionProof.lastFailureReason ?? "Repair latest failed surface proof.";

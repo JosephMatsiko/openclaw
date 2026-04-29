@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { SurfaceExtractionMethod, SurfaceProofRecord } from "./capability-ledger.js";
 import { signRunnerReceipt } from "./receipt.js";
 import type { FleetDispatchPlan, FleetDispatchTask } from "./runner-dispatch.js";
+import type { SurfaceTransportProofRecord } from "./surface-transport-audit.js";
 import type { RunnerReceipt } from "./types.js";
 
 export type RunnerAdapterOutput = {
@@ -18,6 +19,7 @@ export type RunnerAdapterOutput = {
   promptDeliveryProof?: SurfaceProofRecord;
   answerAttributionProof?: SurfaceProofRecord;
   extractionMethod?: SurfaceExtractionMethod;
+  transportProofs?: SurfaceTransportProofRecord[];
 };
 
 export type RunnerOutputCalibrationVerdict = "usable" | "degraded" | "failed";
@@ -48,6 +50,7 @@ export type FleetDispatchTaskExecution =
       promptDeliveryProof: SurfaceProofRecord;
       answerAttributionProof: SurfaceProofRecord;
       extractionMethod: SurfaceExtractionMethod;
+      transportProofs: SurfaceTransportProofRecord[];
       countingEligible: boolean;
     }
   | {
@@ -166,6 +169,7 @@ async function executeFleetDispatchTask({
         checkedAt: endedAt,
       });
     const extractionMethod = output.extractionMethod ?? defaultExtractionMethod(task.surface);
+    const transportProofs = output.transportProofs ?? [];
     const modelVerified =
       output.modelVerified &&
       calibration.verdict === "usable" &&
@@ -207,6 +211,7 @@ async function executeFleetDispatchTask({
         promptDeliveryProof,
         answerAttributionProof,
         extractionMethod,
+        transportProofs,
         countingEligible: modelVerified,
       },
     };
@@ -263,6 +268,7 @@ function requiresExclusiveGuiLane(surface: string): boolean {
     "aistudio/web",
     "perplexity/mac-app",
     "perplexity/web",
+    "perplexity/comet",
     "grok/web-or-app",
   ].includes(surface);
 }
@@ -282,16 +288,18 @@ export function calibrateRunnerOutput({
   const lower = trimmed.toLowerCase();
   const promptCandidates = normalizePromptCandidates(prompt);
   const promptText = promptCandidates.join("\n\n");
+  const normalizedPromptText = normalizeSurfaceProofOcr(promptText);
+  const normalizedTrimmed = normalizeSurfaceProofOcr(trimmed);
   const requiredScoutLabels = ["claims:", "risks:", "missing_evidence:", "deepen_needed:"];
   const labelsFound = requiredScoutLabels.filter((label) => lower.includes(label)).length;
   const strictLocalScout = family === "sovereign-local" && surface === "ollama/localhost";
   const literalExactRequested =
     /\b(?:say|reply|return|respond|answer)\s+(?:with\s+)?exactly\b/i.test(promptText);
-  const surfaceProofRequested = /\bSURFACE_PROOF_OK\b/.test(promptText);
-  const surfaceProofTokenPresent = /\bSURFACE_PROOF_OK\b/.test(trimmed);
+  const surfaceProofRequested = /\bSURFACE_PROOF_OK\b/.test(normalizedPromptText);
+  const surfaceProofTokenPresent = /\bSURFACE_PROOF_OK\b/.test(normalizedTrimmed);
   const literalProofToken =
     literalExactRequested &&
-    /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(trimmed) &&
+    /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(normalizedTrimmed) &&
     trimmed.length <= 240;
   const literalLocalDiagnostic =
     strictLocalScout &&
@@ -378,6 +386,12 @@ function looksLikePromptEcho({ text, prompt }: { text: string; prompt?: string }
 
 function normalizeForPromptEcho(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
+}
+
+function normalizeSurfaceProofOcr(value: string): string {
+  return value
+    .replace(/\bSURFACE\s+PROOF\s+(?:OK|OIC|0K)\b/gi, "SURFACE_PROOF_OK")
+    .replace(/\bSURFACE[\s-]+PROOF[\s-]+(?:OK|OIC|0K)\b/gi, "SURFACE_PROOF_OK");
 }
 
 function normalizePromptCandidates(prompt: string | string[] | undefined): string[] {
@@ -776,7 +790,10 @@ export function createGrokWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "grok/web-or-app",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -823,7 +840,10 @@ export function createChatGptWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "chatgpt/web-chat",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -882,7 +902,7 @@ export function createClaudeWebRunnerAdapter({
     "extensions",
     "memory-graph",
     "scripts",
-    "research-claude-ai-chat.mjs",
+    "research-claude-ai-pwa.mjs",
   ),
   spawnImpl = spawn,
   cwd = process.cwd(),
@@ -896,7 +916,7 @@ export function createClaudeWebRunnerAdapter({
       const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--ask", "--json", "--web-only", deliveredPrompt],
+          args: [scriptPath, "--json", "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "claude/web-chat",
             baseTimeoutMs: task.timeoutMs,
@@ -916,7 +936,10 @@ export function createClaudeWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "claude/web-chat",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "pwa-ocr",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -940,10 +963,10 @@ export function createClaudeMacRunnerAdapter({
     surface: "claude/mac-app",
     async run(task) {
       const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
-      const text = await runCommandWithTimeout(
+      const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--prompt", deliveredPrompt],
+          args: [scriptPath, "--json", "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "claude/mac-app",
             baseTimeoutMs: task.timeoutMs,
@@ -955,14 +978,18 @@ export function createClaudeMacRunnerAdapter({
         },
         spawnImpl,
       );
+      const parsed = parseJsonTextOutput(stdout);
       return {
-        text,
+        text: parsed.text,
         actualRunner: "claude-mac-primary",
         actualFamily: "anthropic",
-        modelClaimed: "claude/mac-app",
+        modelClaimed: parsed.modelUsed ?? "claude/mac-app",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "app-driver-text",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "app-driver-text",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -1009,7 +1036,10 @@ export function createGeminiWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "gemini/web-chat",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -1056,7 +1086,10 @@ export function createAiStudioWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "aistudio/web",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -1080,10 +1113,10 @@ export function createPerplexityMacRunnerAdapter({
     surface: "perplexity/mac-app",
     async run(task) {
       const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
-      const text = await runCommandWithTimeout(
+      const stdout = await runCommandWithTimeout(
         {
           command,
-          args: [scriptPath, "--mode", "research", "--prompt", deliveredPrompt],
+          args: [scriptPath, "--mode", "research", "--json", "--prompt", deliveredPrompt],
           timeoutMs: computeRunnerTimeoutBudget({
             surface: "perplexity/mac-app",
             baseTimeoutMs: task.timeoutMs,
@@ -1095,14 +1128,19 @@ export function createPerplexityMacRunnerAdapter({
         },
         spawnImpl,
       );
+      const parsed = parseJsonTextOutput(stdout);
       return {
-        text,
+        text: parsed.text,
         actualRunner: "perplexity-mac-primary",
         actualFamily: "perplexity",
-        modelClaimed: "perplexity/mac-app (incognito)",
+        modelClaimed: parsed.modelUsed ?? "perplexity/mac-app (incognito)",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "app-driver-text",
+        authProfileId: parsed.authProfileId,
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "app-driver-text",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -1149,7 +1187,61 @@ export function createPerplexityWebRunnerAdapter({
         modelClaimed: parsed.modelUsed ?? "perplexity/web",
         modelVerified: true,
         deliveredPrompt,
-        extractionMethod: "driver-json",
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
+      };
+    },
+  };
+}
+
+export function createPerplexityCometRunnerAdapter({
+  command = process.execPath,
+  scriptPath = join(
+    process.cwd(),
+    "extensions",
+    "memory-graph",
+    "scripts",
+    "research-perplexity-comet.mjs",
+  ),
+  spawnImpl = spawn,
+  cwd = process.cwd(),
+}: ScriptRunnerAdapterOptions = {}): RunnerAdapter {
+  return {
+    adapterId: "perplexity-comet-primary",
+    family: "perplexity",
+    surface: "perplexity/comet",
+    async run(task) {
+      const deliveredPrompt = buildSealedCliScoutPrompt(task.prompt);
+      const stdout = await runCommandWithTimeout(
+        {
+          command,
+          args: [scriptPath, "--ask", "--json", "--prompt", deliveredPrompt],
+          timeoutMs: computeRunnerTimeoutBudget({
+            surface: "perplexity/comet",
+            baseTimeoutMs: task.timeoutMs,
+            promptChars: task.prompt.length,
+            envName: "CHUCK_PERPLEXITY_COMET_TIMEOUT_MS",
+          }).timeoutMs,
+          cwd,
+          env: guiRunnerEnv(task),
+        },
+        spawnImpl,
+      );
+      const parsed = parseJsonTextOutput(stdout);
+      return {
+        text: parsed.text,
+        actualRunner: "perplexity-comet-primary",
+        actualFamily: "perplexity",
+        modelClaimed: parsed.modelUsed ?? "perplexity/comet",
+        modelVerified: true,
+        deliveredPrompt,
+        authProfileId: parsed.authProfileId,
+        promptDeliveryProof: parsed.promptDeliveryProof,
+        answerAttributionProof: parsed.answerAttributionProof,
+        extractionMethod: parsed.extractionMethod ?? "driver-json",
+        transportProofs: parsed.transportProofs,
       };
     },
   };
@@ -1191,6 +1283,7 @@ export function defaultRunnerAdapters(): RunnerAdapter[] {
     // Added 2026-04-28: perplexity/web adapter exists but was missing from
     // defaults; including it lets perplexity/web be probed via onboard-prove.
     createPerplexityWebRunnerAdapter(),
+    createPerplexityCometRunnerAdapter(),
     createGrokWebRunnerAdapter(),
   ];
 }
@@ -1265,9 +1358,12 @@ function timeoutProfileForSurface(surface: string): {
       hardCeilingMs: 360_000,
     };
   }
-  if (surface === "perplexity/web") {
+  if (surface === "perplexity/web" || surface === "perplexity/comet") {
     return {
-      label: "browser-gui-perplexity-research",
+      label:
+        surface === "perplexity/comet"
+          ? "comet-shared-max-research"
+          : "browser-gui-perplexity-research",
       minMs: 150_000,
       coldStartMs: 90_000,
       msPerPromptKChar: 12_000,
@@ -1373,14 +1469,93 @@ function timeoutProfileForSurface(surface: string): {
   };
 }
 
-function parseJsonTextOutput(stdout: string): { text: string; modelUsed?: string } {
-  const parsed = JSON.parse(stdout) as { text?: unknown; modelUsed?: unknown };
+function parseJsonTextOutput(stdout: string): {
+  text: string;
+  modelUsed?: string;
+  authProfileId?: string;
+  promptDeliveryProof?: SurfaceProofRecord;
+  answerAttributionProof?: SurfaceProofRecord;
+  extractionMethod?: SurfaceExtractionMethod;
+  transportProofs?: SurfaceTransportProofRecord[];
+} {
+  const parsed = JSON.parse(stdout) as {
+    text?: unknown;
+    modelUsed?: unknown;
+    authProfileId?: unknown;
+    promptDeliveryProof?: unknown;
+    answerAttributionProof?: unknown;
+    extractionMethod?: unknown;
+    transportProofs?: unknown;
+  };
   const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
   if (!text) {
     throw new Error("script runner returned JSON without text");
   }
   const modelUsed = typeof parsed.modelUsed === "string" ? parsed.modelUsed : undefined;
-  return { text, modelUsed };
+  const authProfileId = typeof parsed.authProfileId === "string" ? parsed.authProfileId : undefined;
+  const promptDeliveryProof = isSurfaceProofRecord(parsed.promptDeliveryProof)
+    ? parsed.promptDeliveryProof
+    : undefined;
+  const answerAttributionProof = isSurfaceProofRecord(parsed.answerAttributionProof)
+    ? parsed.answerAttributionProof
+    : undefined;
+  const extractionMethod = isSurfaceExtractionMethod(parsed.extractionMethod)
+    ? parsed.extractionMethod
+    : undefined;
+  const transportProofs = Array.isArray(parsed.transportProofs)
+    ? parsed.transportProofs.filter(isSurfaceTransportProofRecord)
+    : undefined;
+  return {
+    text,
+    modelUsed,
+    authProfileId,
+    promptDeliveryProof,
+    answerAttributionProof,
+    extractionMethod,
+    transportProofs,
+  };
+}
+
+function isSurfaceProofRecord(value: unknown): value is SurfaceProofRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const verdict = (value as { verdict?: unknown }).verdict;
+  return verdict === "proved" || verdict === "missing" || verdict === "failed";
+}
+
+function isSurfaceExtractionMethod(value: unknown): value is SurfaceExtractionMethod {
+  return (
+    value === "http-json" ||
+    value === "cli-stdout" ||
+    value === "driver-json" ||
+    value === "app-driver-text" ||
+    value === "pwa-ocr" ||
+    value === "ocr-recovery" ||
+    value === "legacy-runner-receipt" ||
+    value === "connector" ||
+    value === "external" ||
+    value === "unknown"
+  );
+}
+
+function isSurfaceTransportProofRecord(value: unknown): value is SurfaceTransportProofRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const proof = value as Partial<SurfaceTransportProofRecord>;
+  return (
+    typeof proof.surface === "string" &&
+    (proof.criterion === "open-target" ||
+      proof.criterion === "mode-switch" ||
+      proof.criterion === "prompt-delivery" ||
+      proof.criterion === "answer-attribution" ||
+      proof.criterion === "result-extraction" ||
+      proof.criterion === "workstation-return") &&
+    (proof.verdict === "proved" || proof.verdict === "missing" || proof.verdict === "failed") &&
+    typeof proof.method === "string" &&
+    typeof proof.evidence === "string"
+  );
 }
 
 function commandRunnerAdapter({

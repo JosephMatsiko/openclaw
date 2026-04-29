@@ -603,6 +603,7 @@ const PROVISIONAL_RUNNER_SURFACES = new Set([
   "aistudio/web",
   "perplexity/web",
   "perplexity/mac-app",
+  "perplexity/comet",
   "grok/web-or-app",
 ]);
 
@@ -651,6 +652,7 @@ function healthKeyForVoice(voice: string): string {
     "gemini-studio": "aistudio",
     "perplexity-mac": "perplexity",
     "perplexity-web": "perplexity",
+    "perplexity-comet": "perplexity",
     grok: "grok",
     "ollama-local": "ollama",
   };

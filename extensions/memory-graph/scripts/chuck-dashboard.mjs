@@ -29,11 +29,14 @@ const UPSTREAM_SYNC_DIR = join(CHUCK_V2_STATE_DIR, "upstream-sync");
 const SURFACE_CONTROL_DIR = join(CHUCK_V2_STATE_DIR, "surface-control");
 const SURFACE_RETURN_RECEIPTS_DIR = join(SURFACE_CONTROL_DIR, "return-receipts");
 const STUCK_SURFACE_CONTRIBUTIONS_DIR = join(CHUCK_V2_STATE_DIR, "stuck-surface-contributions");
+const WORK_LEDGER_PATH = join(CHUCK_V2_STATE_DIR, "parallel-work-ledger.jsonl");
+const WORK_LEDGER_LATEST_PATH = join(CHUCK_V2_STATE_DIR, "parallel-work-latest.json");
 const SCORES_PATH = join(STATE_DIR, "apex-principle-scores.json");
 const CURATOR_PATH = join(STATE_DIR, "apex-curator-state.json");
 const FLEET_ROUTER_PATH = join(STATE_DIR, "fleet-router-scores.json");
 let surfaceAtlasCache = null;
 let capabilityLedgerCache = null;
+let transportAuditCache = null;
 
 const DEFAULT_PORT = 7777;
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +187,104 @@ function builderStatus({ limit = 8 } = {}) {
     pendingApproval,
     active,
     recent,
+  };
+}
+
+function readJsonlTail(path, { limit = 20 } = {}) {
+  if (!existsSync(path)) {
+    return [];
+  }
+  return safe(
+    () =>
+      readFileSync(path, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .slice(-limit)
+        .map((line) => JSON.parse(line))
+        .toReversed(),
+    [],
+  );
+}
+
+function dashboardGitSnapshot({ limit = 80 } = {}) {
+  const status = spawnSync("git", ["status", "--short"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const branch = spawnSync("git", ["branch", "--show-current"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  if (status.status !== 0) {
+    return {
+      available: false,
+      reason: status.stderr || "git status failed",
+      branch: branch.stdout?.trim() || null,
+      dirtyCount: 0,
+      files: [],
+    };
+  }
+  const files = String(status.stdout ?? "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const code = line.slice(0, 2);
+      const rawPath = line.slice(3).trim();
+      const renameIndex = rawPath.lastIndexOf(" -> ");
+      const path = renameIndex >= 0 ? rawPath.slice(renameIndex + 4).trim() : rawPath;
+      return { code, path };
+    });
+  return {
+    available: true,
+    branch: branch.stdout?.trim() || null,
+    dirtyCount: files.length,
+    files: files.slice(0, limit),
+  };
+}
+
+function workLedgerStatus({ limit = 12 } = {}) {
+  const latest = readJsonSafe(WORK_LEDGER_LATEST_PATH, null);
+  const events = latest?.events?.length
+    ? latest.events.slice(0, limit)
+    : readJsonlTail(WORK_LEDGER_PATH, { limit });
+  const git = dashboardGitSnapshot({ limit: 80 });
+  if (!latest && events.length === 0) {
+    return {
+      available: false,
+      reason: "no parallel work ledger yet",
+      ledgerPath: WORK_LEDGER_PATH,
+      latestPath: WORK_LEDGER_LATEST_PATH,
+      events: [],
+      lanes: [],
+      git,
+    };
+  }
+  const byLane = new Map();
+  for (const event of [...events].toReversed()) {
+    const lane = event.lane ?? "default";
+    if (!byLane.has(lane)) {
+      byLane.set(lane, event);
+    }
+  }
+  return {
+    available: true,
+    generatedAt: new Date().toISOString(),
+    ledgerPath: WORK_LEDGER_PATH,
+    latestPath: WORK_LEDGER_LATEST_PATH,
+    latestEvent: latest?.latestEvent ?? events[0] ?? null,
+    events,
+    lanes: [...byLane.values()].map((event) => ({
+      lane: event.lane ?? "default",
+      agent: event.agent ?? "unknown",
+      status: event.status ?? "unknown",
+      summary: event.summary ?? "",
+      updatedAt: event.createdAt ?? event.updatedAt ?? null,
+      files: event.files ?? [],
+    })),
+    git,
   };
 }
 
@@ -393,6 +494,40 @@ async function capabilityLedgerStatus({ maxAgeMs = 30_000 } = {}) {
     entries: run.parsed.ledger.entries ?? [],
   };
   capabilityLedgerCache = { cachedAt: now, value };
+  return value;
+}
+
+async function transportAuditStatus({ maxAgeMs = 30_000 } = {}) {
+  const now = Date.now();
+  if (transportAuditCache && now - transportAuditCache.cachedAt < maxAgeMs) {
+    return transportAuditCache.value;
+  }
+  const run = await runChuckCli(["--transport-audit", "--json"], {
+    timeoutMs: dashboardCommandTimeoutMs({ kind: "surface-atlas" }),
+  });
+  if (!run.ok || !run.parsed?.audit) {
+    const value = {
+      available: false,
+      reason: run.parseError || run.stderr || run.error || "transport audit unavailable",
+      run,
+    };
+    transportAuditCache = { cachedAt: now, value };
+    return value;
+  }
+  const audit = run.parsed.audit;
+  const value = {
+    available: true,
+    refreshedAt: run.endedAt,
+    text: run.parsed.text,
+    summary: {
+      totalSurfaces: Array.isArray(audit.entries) ? audit.entries.length : 0,
+      loadBearing: audit.loadBearing ?? 0,
+      partial: audit.partial ?? 0,
+      missing: audit.missing ?? 0,
+    },
+    entries: audit.entries ?? [],
+  };
+  transportAuditCache = { cachedAt: now, value };
   return value;
 }
 
@@ -1053,6 +1188,12 @@ async function buildSnapshot() {
     pendingApproval: [],
     recent: [],
   });
+  const workLedger = safe(workLedgerStatus, {
+    available: false,
+    reason: "parallel work ledger unavailable",
+    events: [],
+    lanes: [],
+  });
   const modelDoctor = safe(modelDoctorStatus, {
     available: false,
     reason: "model doctor unavailable",
@@ -1081,6 +1222,10 @@ async function buildSnapshot() {
     available: false,
     reason: "capability ledger unavailable",
   });
+  const transportAudit = await safeAsync(transportAuditStatus, {
+    available: false,
+    reason: "transport audit unavailable",
+  });
   const panels = safe(() => panelsFromAudit(fleet), { available: false, runs: [] });
   const events = safe(eventsLast24h, { total24h: 0, recent: [], global: null });
   return {
@@ -1097,6 +1242,7 @@ async function buildSnapshot() {
     scorer,
     router,
     builder,
+    workLedger,
     modelDoctor,
     familyRegistry,
     latestFleetRun,
@@ -1104,6 +1250,7 @@ async function buildSnapshot() {
     surfaceControl,
     surfaceAtlas,
     capabilityLedger,
+    transportAudit,
     recentEvents: events,
   };
 }
@@ -1572,6 +1719,9 @@ async function handleRequest(req, res) {
     if (url === "/api/chuck-v2/build/status" || url === "/api/chuck-v2/build/docket") {
       return jsonResponse(res, 200, builderStatus());
     }
+    if (url === "/api/chuck-v2/work-ledger") {
+      return jsonResponse(res, 200, workLedgerStatus());
+    }
     if (url === "/api/chuck-v2/build") {
       return await handleChuckBuildPlan(req, res);
     }
@@ -1601,6 +1751,9 @@ async function handleRequest(req, res) {
     }
     if (url === "/api/chuck-v2/capability-ledger") {
       return jsonResponse(res, 200, await capabilityLedgerStatus({ maxAgeMs: 0 }));
+    }
+    if (url === "/api/chuck-v2/transport-audit") {
+      return jsonResponse(res, 200, await transportAuditStatus({ maxAgeMs: 0 }));
     }
     if (url === "/api/chuck-v2/latest-fleet-run") {
       return jsonResponse(res, 200, latestRunnerExecutionStatus({ minimumSurfaces: 3 }));
@@ -1692,8 +1845,9 @@ const DASHBOARD_HTML = `<!doctype html>
     color: var(--fg-dim); margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   .grid { display: grid; gap: 12px; }
   .grid.cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  @media (max-width: 900px) { .grid.three { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .grid.two, .grid.three { grid-template-columns: 1fr; } }
   .card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; transition: border-color 0.15s; }
   .card.voice { display: flex; flex-direction: column; gap: 6px; position: relative; }
   .card.voice .vrow { display: flex; justify-content: space-between; align-items: baseline; }
@@ -1834,7 +1988,9 @@ const DASHBOARD_HTML = `<!doctype html>
   </div>
 	</section>
 	<section><h2 class="section">Fleet Readiness Board</h2><div id="capability-ledger"><div class="empty">loading…</div></div></section>
+	<section><h2 class="section">Surface Transport Audit</h2><div id="transport-audit"><div class="empty">loading…</div></div></section>
 	<section><h2 class="section">Latest Fleet Run</h2><div id="latest-fleet-run"><div class="empty">loading…</div></div></section>
+<section><h2 class="section">Parallel Work Ledger</h2><div id="work-ledger"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Surface Return</h2><div id="surface-control"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Surface Atlas</h2><div id="surface-atlas"><div class="empty">loading…</div></div></section>
 <section><h2 class="section">Repo Hygiene</h2><div id="repo-hygiene"><div class="empty">loading…</div></div></section>
@@ -2426,6 +2582,44 @@ const DASHBOARD_HTML = `<!doctype html>
       '</div>';
   }
 
+  function renderWorkLedger(ledger) {
+    const root = $("work-ledger");
+    if (!root) { return; }
+    const git = ledger?.git || {};
+    if (!ledger?.available) {
+      root.innerHTML = '<div class="empty">' + escHtml(ledger?.reason ?? "no parallel work ledger yet") + '</div>' +
+        '<div class="run-summary" style="margin-top:10px;">' + [
+          metric("branch", git.branch || "unknown"),
+          metric("dirty", git.dirtyCount ?? 0),
+        ].join("") + '</div>';
+      return;
+    }
+    const summary = [
+      metric("lanes", (ledger.lanes || []).length),
+      metric("events", (ledger.events || []).length),
+      metric("branch", git.branch || "unknown"),
+      metric("dirty", git.dirtyCount ?? 0),
+      metric("latest", ledger.latestEvent ? fmtAgo(ledger.latestEvent.createdAt) : "none"),
+    ].join("");
+    const lanes = (ledger.lanes || []).slice(0, 8).map((lane) => {
+      const files = (lane.files || []).slice(0, 5).join(", ") || "no files listed";
+      return '<li style="display:block;"><div style="display:flex;justify-content:space-between;gap:10px;">' +
+        '<span class="slug">' + escHtml((lane.lane || "default") + " · " + (lane.agent || "unknown")) + '</span><span class="w">' +
+        escHtml(lane.status || "unknown") + '</span></div>' +
+        '<div style="color:var(--fg-dim);margin-top:3px;">' + escHtml(lane.summary || "") + '</div>' +
+        '<div style="color:var(--fg-dim);margin-top:3px;">files: ' + escHtml(files) + '</div>' +
+        '</li>';
+    }).join("");
+    const dirty = (git.files || []).slice(0, 12).map((file) =>
+      '<li><span class="slug">' + escHtml(file.path) + '</span><span class="w">' + escHtml(file.code) + '</span></li>'
+    ).join("");
+    root.innerHTML = '<div class="run-summary">' + summary + '</div>' +
+      '<div class="grid two">' +
+      '<div class="card"><div class="col-title">Lanes</div><ul class="princ">' + (lanes || '<li><span class="slug">no lanes announced</span><span class="w">empty</span></li>') + '</ul></div>' +
+      '<div class="card"><div class="col-title">Dirty Files</div><ul class="princ">' + (dirty || '<li><span class="slug">worktree clean</span><span class="w">ok</span></li>') + '</ul></div>' +
+      '</div>';
+  }
+
   function renderCapabilityLedger(ledger) {
     const root = $("capability-ledger");
     if (!root) { return; }
@@ -2471,6 +2665,49 @@ const DASHBOARD_HTML = `<!doctype html>
     root.innerHTML = '<div class="run-summary">' + summaryHtml + '</div>' +
       '<div class="receipt-grid">' + (cards || '<div class="empty">no capability entries</div>') + '</div>' +
       '<div style="color:var(--fg-faint);font:11px var(--mono);margin-top:8px;">The Kernel relies on load-bearing surfaces only. Late OCR/recovery evidence remains visible but degraded until normal proof succeeds.</div>';
+  }
+
+  function renderTransportAudit(audit) {
+    const root = $("transport-audit");
+    if (!root) { return; }
+    if (!audit?.available) {
+      root.innerHTML = '<div class="empty">' + escHtml(audit?.reason ?? "transport audit unavailable") + '</div>';
+      return;
+    }
+    const summary = audit.summary || {};
+    const entries = audit.entries || [];
+    const summaryHtml = [
+      metric("transport-load-bearing", summary.loadBearing || 0),
+      metric("partial", summary.partial || 0),
+      metric("missing", summary.missing || 0),
+      metric("surfaces", summary.totalSurfaces || entries.length || 0),
+      metric("refreshed", fmtAgo(audit.refreshedAt)),
+    ].join("");
+    const order = { missing: 0, partial: 1, "load-bearing": 2 };
+    const cards = [...entries]
+      .sort((a, b) => {
+        const ai = order[a.proofGrade] ?? 9;
+        const bi = order[b.proofGrade] ?? 9;
+        if (ai !== bi) return ai - bi;
+        return String(a.surface).localeCompare(String(b.surface));
+      })
+      .slice(0, 24)
+      .map((entry) => {
+        const cls = entry.proofGrade === "load-bearing" ? "ok" : entry.proofGrade === "missing" ? "err" : "warn";
+        const gaps = (entry.gaps || []).join(", ") || "none";
+        const proven = (entry.provenProofs || []).join(", ") || "none";
+        return '<div class="receipt" data-family="' + escHtml(entry.family) + '"><div class="top"><span class="family">' +
+          escHtml(entry.family + " · " + entry.surface) + '</span><span class="status ' + cls + '">' + escHtml(entry.proofGrade) +
+          '</span></div><div style="color:var(--fg-dim);">primary: ' + escHtml(entry.primaryTransport || "unknown") +
+          ' · readiness: ' + escHtml(entry.readiness || "unknown") + '</div>' +
+          '<div style="color:var(--fg-dim);margin-top:3px;">proven: ' + escHtml(proven) + '</div>' +
+          '<div style="color:' + (gaps === "none" ? "var(--fg-dim)" : "var(--warn)") + ';margin-top:3px;">gaps: ' + escHtml(gaps) + '</div>' +
+          '<div style="color:var(--fg-faint);font:11px var(--mono);margin-top:3px;">next: ' + escHtml(entry.nextAction || "") + '</div>' +
+          '</div>';
+      }).join("");
+    root.innerHTML = '<div class="run-summary">' + summaryHtml + '</div>' +
+      '<div class="receipt-grid">' + (cards || '<div class="empty">no transport audit entries</div>') + '</div>' +
+      '<div style="color:var(--fg-faint);font:11px var(--mono);margin-top:8px;">Transport load-bearing means the surface has the specific controls/proofs the driver needs, not merely that the family can answer.</div>';
   }
 
   function renderLatestFleetRun(run) {
@@ -2848,7 +3085,9 @@ const DASHBOARD_HTML = `<!doctype html>
       renderHeader(snap); renderFleet(snap.fleet, snap.familyRegistry); renderProcs(snap.processes);
       renderScorer(snap.scorer); renderCurator(snap.curator); renderRouter(snap.router);
       renderBuilder(snap.builder);
+      renderWorkLedger(snap.workLedger);
       renderCapabilityLedger(snap.capabilityLedger);
+      renderTransportAudit(snap.transportAudit);
       renderLatestFleetRun(snap.latestFleetRun);
       renderSurfaceControl(snap.surfaceControl);
       renderSurfaceAtlas(snap.surfaceAtlas);

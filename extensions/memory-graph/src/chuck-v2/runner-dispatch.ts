@@ -53,6 +53,7 @@ const VOICE_TO_HEALTH_KEY: Record<string, string> = {
   "gemini-studio": "aistudio",
   "perplexity-mac": "perplexity",
   "perplexity-web": "perplexity",
+  "perplexity-comet": "perplexity",
   grok: "grok",
   "ollama-local": "ollama",
 };
