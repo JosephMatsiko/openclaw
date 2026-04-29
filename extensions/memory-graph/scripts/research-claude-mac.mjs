@@ -229,6 +229,44 @@ function classifyClaudeScreen(ocrText) {
   return "unknown";
 }
 
+function visibleModeControls(ocrText) {
+  const text = String(ocrText ?? "");
+  return ["Chat", "Cowork", "Code", "Customize", "Design"].filter((mode) =>
+    new RegExp(`\\b${mode}\\b`, "i").test(text),
+  );
+}
+
+function transportProofsForClaudeMac({ screen = "unknown", ocrText = "" } = {}) {
+  const checkedAt = new Date().toISOString();
+  const modes = visibleModeControls(ocrText);
+  const modeEvidence = `screen: ${screen}; visible controls: ${modes.join(", ") || "none"}`;
+  const modeProved = screen === "chat-home" || screen === "code-home" || modes.length > 0;
+  return [
+    {
+      surface: "claude/mac-app",
+      criterion: "open-target",
+      verdict: "proved",
+      method: "native-bundle-activation",
+      evidence: `frontmost bundle ${APP_BUNDLE_ID}`,
+      checkedAt,
+      caveats: [],
+    },
+    {
+      surface: "claude/mac-app",
+      criterion: "mode-switch",
+      verdict: modeProved ? "proved" : "missing",
+      method: "native-ocr-mode-map",
+      evidence: modeEvidence,
+      checkedAt,
+      caveats: modeProved
+        ? [
+            "Mode proof confirms prompt-surface/mode targeting; per-mode task probes remain task-class calibration.",
+          ]
+        : ["No native Claude mode controls or prompt surface were visible."],
+    },
+  ];
+}
+
 async function closeModalIfPresent() {
   const snap = await captureOcr({ label: "claude-mac-modal" });
   const screen = classifyClaudeScreen(snap.ocr.fullText);
@@ -398,6 +436,7 @@ export async function askClaudeMac({ prompt, pollUntilStableMs = 240_000, tickMs
       text,
       modelUsed: `claude-mac-app/opus-4.7-adaptive (${surface.screen})`,
       screen: surface.screen,
+      transportProofs: transportProofsForClaudeMac(surface),
     };
   } finally {
     if (typeof savedPb === "string") {
@@ -476,8 +515,12 @@ async function mainCli() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  withWorkstationReturn(() => wrapLifecycle("research-claude-mac", mainCli)).catch((error) => {
-    console.error(`[claude-mac] ${error?.stack ?? error}`);
-    process.exit(1);
-  });
+  withWorkstationReturn(() => wrapLifecycle("research-claude-mac", mainCli))
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error(`[claude-mac] ${error?.stack ?? error}`);
+      process.exit(1);
+    });
 }

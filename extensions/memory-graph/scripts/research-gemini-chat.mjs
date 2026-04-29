@@ -107,14 +107,68 @@ async function readCurrentModel(tab) {
   const r = await evalInTab(
     tab,
     `
-    var mode = Array.from(document.querySelectorAll('button')).find(function(b) {
-      return /\\b(Pro|Flash|Advanced|Deep Research)\\b/i.test((b.innerText || '').trim())
-        || /mode picker/i.test(b.getAttribute('aria-label') || '');
-    });
-    return mode ? (mode.innerText || mode.getAttribute('aria-label') || '').trim() : "";
+    var btn = document.querySelector('[data-test-id="bard-mode-menu-button"]')
+      || Array.from(document.querySelectorAll('button')).find(function(b) {
+        return /\\b(Pro|Flash|Fast|Advanced|Thinking|Deep Think|Deep Research)\\b/i.test((b.innerText || '').trim())
+          || /mode picker/i.test(b.getAttribute('aria-label') || '');
+      });
+    return btn ? (btn.innerText || btn.getAttribute('aria-label') || '').trim() : "";
   `,
   );
   return (r.ok && r.value) || "gemini";
+}
+
+// Switch Gemini-web to a target mode (e.g., "Pro", "Thinking", "Deep Think").
+// Live-DOM verified 2026-04-28: model selector is `[data-test-id=
+// "bard-mode-menu-button"]`. Click opens a CDK overlay menu; options
+// appear as buttons with role=menuitem. Joseph's gemini-web defaults to
+// "Fast" — switching to Pro before submit yields ~2x stronger output.
+async function switchGeminiMode(tab, targetMode = "Pro") {
+  const r = await evalInTab(
+    tab,
+    `
+    var current = document.querySelector('[data-test-id="bard-mode-menu-button"]');
+    var currentText = current ? (current.innerText || '').trim() : '';
+    if (!current) return { ok: false, error: "no mode button" };
+    if (currentText.toLowerCase().includes(${JSON.stringify(targetMode.toLowerCase())})) {
+      return { ok: true, alreadySet: true, current: currentText };
+    }
+    current.click();
+    return { ok: true, opened: true, was: currentText };
+  `,
+  );
+  if (!r.ok || !r.value?.ok) {
+    return { ok: false, error: r.error ?? r.value?.error };
+  }
+  if (r.value.alreadySet) {
+    return { ok: true, model: r.value.current, alreadySet: true };
+  }
+  // Wait for menu to render, then click the target option.
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const click = await evalInTab(
+    tab,
+    `
+    var target = ${JSON.stringify(targetMode)};
+    var menuItems = Array.from(document.querySelectorAll('[role="menuitem"], button[mat-menu-item]'));
+    var match = menuItems.find(function(el) {
+      var txt = (el.innerText || el.textContent || '').trim();
+      return new RegExp('^' + target + '\\\\b', 'i').test(txt);
+    });
+    if (!match) {
+      // Close menu (click body) to avoid leaving open
+      document.body.click();
+      return { ok: false, error: "no menu option matching " + target, items: menuItems.map(function(m) { return (m.innerText || '').trim().slice(0, 40); }).slice(0, 8) };
+    }
+    match.click();
+    return { ok: true, picked: (match.innerText || '').trim() };
+  `,
+  );
+  if (!click.ok || click.value?.ok === false) {
+    return { ok: false, error: click.value?.error ?? click.error, options: click.value?.items };
+  }
+  // Brief settle so the model-pill updates before submit.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  return { ok: true, model: click.value.picked };
 }
 
 async function submitPrompt(tab, prompt) {
@@ -222,7 +276,11 @@ async function readReply(tab, { prompt = "", minAssistantCount = 0 } = {}) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askGeminiChat({ prompt, forceFresh = false } = {}) {
+export async function askGeminiChat({
+  prompt,
+  forceFresh = false,
+  mode = process.env.CHUCK_GEMINI_MODE ?? "Pro",
+} = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askGeminiChat: prompt required");
   }
@@ -238,6 +296,25 @@ export async function askGeminiChat({ prompt, forceFresh = false } = {}) {
   const state = await waitComposerReady(tab);
   if (!state.ok) {
     throw new Error(`gemini not ready: ${state.reason} url=${state.url}`);
+  }
+  // Switch to target mode (default Pro) BEFORE reading the model label
+  // and submitting. Joseph's gemini-web defaults to Fast — using Pro
+  // yields meaningfully stronger output. Skipped silently if already
+  // on target mode or if the selector can't be found (defensive).
+  let modeSwitchResult = null;
+  if (mode && mode !== "auto") {
+    try {
+      modeSwitchResult = await switchGeminiMode(tab, mode);
+      if (!modeSwitchResult?.ok) {
+        process.stderr.write(
+          `[gemini] mode switch to "${mode}" skipped: ${modeSwitchResult?.error ?? "unknown"}\n`,
+        );
+      } else if (!modeSwitchResult.alreadySet) {
+        process.stderr.write(`[gemini] switched to "${modeSwitchResult.model}"\n`);
+      }
+    } catch (err) {
+      process.stderr.write(`[gemini] mode switch threw: ${err?.message ?? err}\n`);
+    }
   }
   const model = await readCurrentModel(tab);
   const { before } = await submitPrompt(tab, String(prompt));

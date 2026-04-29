@@ -147,27 +147,33 @@ async function readReply(tab) {
   return r.value ?? { text: "", streaming: false };
 }
 
-export async function askClaudeAiChat({ prompt, forceFresh = true } = {}) {
+export async function askClaudeAiChat({
+  prompt,
+  forceFresh = true,
+  urlMatch = CLAUDE_AI_URL_MATCH,
+  startUrl = CLAUDE_AI_START_URL,
+} = {}) {
   if (!prompt || !String(prompt).trim()) {
     throw new Error("askClaudeAiChat: prompt required");
   }
   // findOrOpenTab reuses existing claude.ai tabs, which can silently append
   // to a prior conversation or return a stale assistant turn from pollUntilStable.
   // Force-navigate to /new when forceFresh so every askClaudeAiChat is a fresh thread.
+  // urlMatch/startUrl can be overridden to target specific Claude.ai modes
+  // like /design. These remain modes of the same Anthropic web/PWA surface,
+  // never independent family votes.
   const tab = await findOrOpenTab({
-    urlMatch: CLAUDE_AI_URL_MATCH,
-    createUrl: CLAUDE_AI_START_URL,
+    urlMatch,
+    createUrl: startUrl,
   });
   if (forceFresh && !tab.created) {
-    // Force-navigate via in-page JS — works across CDP + AppleScript backends
-    // without depending on a driver-level navigate export.
-    await evalInTab(tab, `location.href = ${JSON.stringify(CLAUDE_AI_START_URL)};`);
+    await evalInTab(tab, `location.href = ${JSON.stringify(startUrl)};`);
     await new Promise((r) => setTimeout(r, 800));
   }
   if (tab.created || forceFresh) {
     const ready = await waitForPageReady(tab, {
       timeoutMs: 15000,
-      urlIncludes: CLAUDE_AI_URL_MATCH,
+      urlIncludes: urlMatch,
     });
     if (!ready) {
       throw new Error("claude.ai did not load");

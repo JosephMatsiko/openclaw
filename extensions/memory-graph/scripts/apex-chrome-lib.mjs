@@ -23,6 +23,55 @@
 
 import { spawn } from "node:child_process";
 
+// URL → PWA app name mapping. Keys are urlMatch substrings; values are
+// the PWA bundle name as installed in ~/Applications/Chrome Apps.localized/.
+// Audited 2026-04-29 against actual installed PWAs. Update when adding
+// new PWA-backed voices.
+const URL_TO_PWA = {
+  "claude.ai": "Claude",
+  "chatgpt.com": "ChatGPT",
+  "gemini.google.com": "Gemini",
+  "aistudio.google.com": "Google AI Studio",
+  "notebooklm.google.com": "NotebookLM",
+  "grok.com": "Grok",
+  "perplexity.ai": "Perplexity (Personal)", // Installed 2026-04-29 (Joseph). Closes T3 browser-only fragility on perplexity-web voice. Bundle: com.google.Chrome.app.kpmdbogdmbfckbgdfdffkleoleokbhod
+};
+
+function urlMatchToPwaName(urlMatch) {
+  for (const [needle, app] of Object.entries(URL_TO_PWA)) {
+    if (urlMatch.includes(needle)) {
+      return app;
+    }
+  }
+  return null;
+}
+
+// Launch a Chrome PWA via `open -a` and wait briefly for its window
+// to materialize. Returns true if the launch command succeeded; the
+// caller is responsible for re-running findScript to pick up the new
+// window. Failure (PWA not installed, etc.) returns false silently —
+// the caller falls through to Chrome multi-tab create-tab.
+async function tryLaunchPwa(pwaName, { settleMs = 1500 } = {}) {
+  return new Promise((resolve) => {
+    const p = spawn("/usr/bin/open", ["-a", pwaName], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    p.stderr.on("data", (c) => {
+      stderr += c.toString();
+    });
+    p.on("error", () => resolve(false));
+    p.on("close", async (code) => {
+      if (code !== 0) {
+        return resolve(false);
+      }
+      // Window settle. PWA launch from cold takes ~1s; warm <300ms.
+      await new Promise((r) => setTimeout(r, settleMs));
+      resolve(true);
+    });
+  });
+}
+
 export function escAS(s) {
   return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -134,6 +183,14 @@ tell application "Google Chrome"
   set active tab index of window id ${winId} to ${t}
 end tell
 `);
+    // Visibility delay — gives the user ~250ms to register the
+    // PWA-window-flash-to-front before subsequent ops kick off. Without
+    // this, the raise + immediately-following submit happen too fast for
+    // Joseph to see WHICH window is being driven (caught 2026-04-28:
+    // "you went to right place to ask but the screen was showing me
+    // chrome browser instead the pwa"). Cost: 250ms latency per voice
+    // launch — negligible vs total run time.
+    await new Promise((r) => setTimeout(r, 250));
     return {
       winIdx: w,
       tabIdx: t,
@@ -142,6 +199,42 @@ end tell
       created: false,
     };
   }
+  // PWA preference enhancement (2026-04-29): if the urlMatch maps to a
+  // known Chrome-installed PWA, try `open -a "<PWA name>"` BEFORE
+  // falling through to the Chrome multi-tab create-tab path. Closes
+  // the "you went to right place to ask but the screen was showing me
+  // chrome browser instead the pwa" gap when a PWA exists but has no
+  // active window. PWA windows give: (a) deterministic single-tab
+  // targeting, (b) no visibility-throttle on backgrounded streaming,
+  // (c) per-voice anchoring in macOS workspace.
+  const pwaName = urlMatchToPwaName(urlMatch);
+  if (pwaName) {
+    const launched = await tryLaunchPwa(pwaName);
+    if (launched) {
+      // Re-run the single-tab search; the PWA should now appear.
+      const refind = await runAppleScript(findScript);
+      if (refind.ok && refind.stdout) {
+        const [w, t, winId] = refind.stdout.split(",").map(Number);
+        await runAppleScript(`
+tell application "Google Chrome"
+  activate
+  set index of window id ${winId} to 1
+  set active tab index of window id ${winId} to ${t}
+end tell
+`);
+        await new Promise((r) => setTimeout(r, 250));
+        return {
+          winIdx: w,
+          tabIdx: t,
+          winId,
+          target: `tab ${t} of window id ${winId}`,
+          created: true,
+          launchedPwa: pwaName,
+        };
+      }
+    }
+  }
+
   const url = createUrl ?? `https://${urlMatch}/`;
   const newTabScript = `
 tell application "Google Chrome"

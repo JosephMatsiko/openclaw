@@ -98,20 +98,31 @@ async function submitPrompt(tab, prompt) {
   if (!send.ok || send.value?.ok === false) {
     try {
       await dispatchKey(tab, "Enter");
+      return {
+        ok: true,
+        buttonText: "keyboard-fallback",
+        caveats: [`Send button click failed: ${send.error ?? send.value?.error ?? "unknown"}`],
+      };
     } catch (err) {
       throw new Error(`chatgpt send failed: ${send.error ?? send.value?.error}`, { cause: err });
     }
   }
+  return { ok: true, buttonText: "Send", caveats: [] };
 }
 
-async function readReply(tab) {
+async function readReply(tab, prompt = "") {
   const r = await evalInTab(
     tab,
     `
+    var promptText = ${JSON.stringify(prompt)};
+    var requiresSurfaceProof = /\\bSURFACE_PROOF_OK\\b/.test(promptText);
     var msgs = document.querySelectorAll("[data-message-author-role=\\"assistant\\"]");
     var last = msgs[msgs.length - 1];
     var md = last ? last.querySelector(".markdown") : null;
     var text = (md && (md.innerText || md.textContent)) || (last && (last.textContent || last.innerText)) || "";
+    if (requiresSurfaceProof && !/\\bSURFACE_PROOF_OK\\b/.test(text)) {
+      return { text: "", streaming: true, waitingFor: "SURFACE_PROOF_OK" };
+    }
     var stop = document.querySelector("button[data-testid=\\"stop-button\\"]") || document.querySelector("button[aria-label*=\\"Stop\\" i]");
     return { text: text, streaming: !!stop };
   `,
@@ -170,11 +181,51 @@ export async function askChatGPTChat({ prompt, forceFresh = true } = {}) {
     throw new Error(`chatgpt not ready: reason=${composerState.reason} url=${composerState.url}`);
   }
   const model = await readCurrentModel(tab);
-  await submitPrompt(tab, String(prompt));
+  const submitProof = await submitPrompt(tab, String(prompt));
   // Long prompts with reasoning models (Thinking, o3-style) can stream for
   // minutes. 300s matches the claude.ai worker's window.
-  const text = await pollUntilStable({ tab, read: readReply, timeoutMs: 300_000 });
-  return { text: text.trim(), modelUsed: `${DEFAULT_MODEL_LABEL} (${model})` };
+  const text = await pollUntilStable({
+    tab,
+    read: async (activeTab) => await readReply(activeTab, String(prompt)),
+    timeoutMs: 300_000,
+  });
+  return {
+    text: text.trim(),
+    modelUsed: `${DEFAULT_MODEL_LABEL} (${model})`,
+    transportProofs: transportProofsForChatGptWeb({
+      model,
+      submitProof,
+      url: composerState.url,
+    }),
+  };
+}
+
+function transportProofsForChatGptWeb({ model = "", submitProof = {}, url = "" } = {}) {
+  const checkedAt = new Date().toISOString();
+  const modelKnown = Boolean(String(model).trim() && String(model).trim() !== "unknown");
+  return [
+    {
+      surface: "chatgpt/web-chat",
+      criterion: "open-target",
+      verdict: "proved",
+      method: "browser-cdp-tab",
+      evidence: url || CHATGPT_START_URL,
+      checkedAt,
+      caveats: [],
+    },
+    {
+      surface: "chatgpt/web-chat",
+      criterion: "mode-switch",
+      verdict: modelKnown ? "proved" : "missing",
+      method: "browser-cdp-model-switcher",
+      evidence: `model=${model || "unknown"}; submit=${submitProof.buttonText ?? "unknown"}`,
+      checkedAt,
+      caveats: [
+        ...(submitProof.caveats ?? []),
+        "Mode proof confirms model switcher/send path; exact model entitlement remains receipt metadata.",
+      ],
+    },
+  ];
 }
 
 function buildResearchPrompt(beat, itemCount) {

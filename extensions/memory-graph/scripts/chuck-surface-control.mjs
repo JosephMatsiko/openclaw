@@ -67,8 +67,8 @@ const SURFACE_APPS = new Set([
   "ChatGPT Atlas", // optional reinstall — TCC has com.openai.atlas history
   "NotebookLM", // pending PWA install (used by TTS path)
   "Sora", // pending PWA install (OpenAI video gen)
-  // Pending installs:
   "Claude", // Claude.ai PWA display name; native Claude.app is distinguished by bundle id below.
+  "Grok", // Chrome PWA for grok.com; xAI surface driver, not Joseph's workspace.
   // Perplexity: NOT in this list. Native Perplexity.app and Comet cover the
   // shared Max account profile; Perplexity web may be Joseph's personal
   // account and should be tagged separately in receipts.
@@ -82,8 +82,8 @@ const WORKSTATION_SAFE_BUNDLE_IDS = new Set([
 ]);
 
 const SURFACE_BUNDLE_IDS = new Set([
-  "com.google.Chrome.app.fmpnliohjhemenmnlpbfagaolkdacoja", // Claude.ai PWA
-  "com.google.Chrome.app.lhcjejhnpnocjjnoledocdlkjkgkplpj", // Claude Design PWA
+  "com.google.Chrome.app.fmpnliohjhemenmnlpbfagaolkdacoja", // Claude.ai PWA; includes Design mode.
+  "com.google.Chrome.app.ggjocahimgaohmigbfhghnlfcnjemagj", // Grok PWA.
 ]);
 
 function usage() {
@@ -264,11 +264,72 @@ function newLeaseId(reason = "surface-run") {
   ].join("-");
 }
 
+function pidIsAlive(pid) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) {
+    return false;
+  }
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function activeLeaseIsLive(lease) {
+  if (!lease || lease.status !== "active") {
+    return false;
+  }
+  const staleMs = Number(process.env.CHUCK_WORKSTATION_LEASE_STALE_MS ?? 2 * 60 * 60 * 1000);
+  const startedAt = Date.parse(lease.startedAt ?? "");
+  const ageMs = Number.isFinite(startedAt) ? Date.now() - startedAt : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(staleMs) && staleMs > 0 && ageMs > staleMs) {
+    return false;
+  }
+  return pidIsAlive(lease.pid);
+}
+
+function retireStaleLease(lease, reason) {
+  if (!lease?.leaseId) {
+    return;
+  }
+  const retired = {
+    ...lease,
+    status: "stale-retired",
+    endedAt: new Date().toISOString(),
+    staleReason: reason,
+  };
+  writeJsonAtomic(join(SURFACE_STATE_DIR, `${lease.leaseId}.json`), retired);
+  writeJsonAtomic(ACTIVE_LEASE_PATH, retired);
+}
+
 async function createWorkstationLease({
   reason = "surface-run",
   runId = process.env.CHUCK_RUN_ID ?? null,
 } = {}) {
   ensureSurfaceStateDir();
+  if (process.env.CHUCK_INHERIT_WORKSTATION_LEASE === "1" && process.env.CHUCK_WORKSTATION_STATE) {
+    return {
+      leaseId: `inherited-${newLeaseId(reason)}`,
+      status: "active",
+      reason,
+      runId,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      inherited: true,
+      workstation: JSON.parse(process.env.CHUCK_WORKSTATION_STATE),
+    };
+  }
+  const active = activeWorkstationLease();
+  if (active?.status === "active" && active.pid !== process.pid) {
+    if (activeLeaseIsLive(active)) {
+      throw new Error(
+        `workstation lease already active: ${active.leaseId} (${active.reason ?? "unknown"}; pid=${active.pid})`,
+      );
+    }
+    retireStaleLease(active, "active pid missing or lease stale before new lease");
+  }
   const workstation = process.env.CHUCK_WORKSTATION_STATE
     ? JSON.parse(process.env.CHUCK_WORKSTATION_STATE)
     : await captureWorkstation();
@@ -501,12 +562,27 @@ async function withWorkstationReturn(fn) {
   const lease = await createWorkstationLease({
     reason: process.env.CHUCK_WORKSTATION_REASON ?? "with-workstation-return",
   });
+  const previousWorkstationState = process.env.CHUCK_WORKSTATION_STATE;
+  const previousInherit = process.env.CHUCK_INHERIT_WORKSTATION_LEASE;
+  process.env.CHUCK_WORKSTATION_STATE = JSON.stringify(lease.workstation);
+  process.env.CHUCK_INHERIT_WORKSTATION_LEASE = "1";
   let output;
   let originalError = null;
   try {
     output = await fn();
   } catch (error) {
     originalError = error;
+  } finally {
+    if (previousWorkstationState === undefined) {
+      delete process.env.CHUCK_WORKSTATION_STATE;
+    } else {
+      process.env.CHUCK_WORKSTATION_STATE = previousWorkstationState;
+    }
+    if (previousInherit === undefined) {
+      delete process.env.CHUCK_INHERIT_WORKSTATION_LEASE;
+    } else {
+      process.env.CHUCK_INHERIT_WORKSTATION_LEASE = previousInherit;
+    }
   }
   const result = await restoreWorkstation(lease);
   if (!result.ok && process.env.CHUCK_WORKSTATION_DEBUG === "1") {

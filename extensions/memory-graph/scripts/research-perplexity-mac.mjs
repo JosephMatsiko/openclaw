@@ -3,7 +3,8 @@
 //
 // Full protocol (per Joseph 2026-04-24):
 //
-//   1. `open perplexity-app://` — guarantees a window.
+//   1. Open the native app by bundle id (`ai.perplexity.mac`) to avoid
+//      silently routing through Chrome/personal Perplexity.
 //   2. Standardize window position + size so fixed coordinates hold.
 //   3. Open Settings (click sidebar gear) → screenshot → vision-read
 //      Incognito Mode toggle state → remember `wasOff` → if OFF, click
@@ -71,7 +72,7 @@ const PERPLEXITY_LEASE_DIR = join(
 const ACTIVE_PERPLEXITY_LEASE_PATH = join(PERPLEXITY_LEASE_DIR, "active-mac-app-lease.json");
 
 const APP_NAME = "Perplexity";
-const APP_URL_SCHEME = "perplexity-app://";
+const APP_BUNDLE_ID = "ai.perplexity.mac";
 
 // Legacy standardized window layout. The current shared-Max profile protocol
 // prefers Perplexity fullscreen so the sidebar/settings route is stable.
@@ -185,6 +186,79 @@ function shouldKeepPerplexityLeaseOpen() {
     return false;
   }
   return true;
+}
+
+function transportProofsForPerplexityMac({
+  mode = "research",
+  incognitoConfirmed = false,
+  threadState = {},
+  modelUsed = "perplexity/mac-app",
+  workstation = {},
+  workstationReturned = false,
+  workstationReturnResult = null,
+  authProfileId = "perplexity-shared-max-native-unverified",
+} = {}) {
+  const checkedAt = new Date().toISOString();
+  const threadEvidence = [
+    `mode=${mode}`,
+    `incognito=${incognitoConfirmed ? "verified" : "unverified"}`,
+    `activeLease=${Boolean(threadState?.activeIncognitoLease)}`,
+    `freshThread=${Boolean(threadState?.freshThread)}`,
+    `composerVisible=${Boolean(threadState?.composerVisible)}`,
+    `conversationVisible=${Boolean(threadState?.conversationVisible)}`,
+    `reason=${threadState?.reason ?? ""}`,
+  ].join("; ");
+  return [
+    {
+      surface: "perplexity/mac-app",
+      criterion: "open-target",
+      verdict: "proved",
+      method: "native-bundle-activation-and-workstation-lease",
+      evidence: `bundle=${APP_BUNDLE_ID}; lease=${workstation?.leaseId ?? "unknown"}; authProfileId=${authProfileId}`,
+      checkedAt,
+      caveats: [
+        "Native Perplexity.app is the shared Max route on this Mac; Chrome perplexity/web is Joseph's personal account unless proven otherwise.",
+      ],
+    },
+    {
+      surface: "perplexity/mac-app",
+      criterion: "mode-switch",
+      verdict: mode && incognitoConfirmed ? "proved" : "missing",
+      method: "native-coordinate-mode-and-incognito-settings",
+      evidence: `${threadEvidence}; model=${modelUsed}`,
+      checkedAt,
+      caveats: [
+        "Mode proof confirms the selected Perplexity surface mode and Incognito lease; Perplexity may still route internally.",
+        "Shared Max proof is account-profile scoped; Comet must still prove its own prompt delivery and answer attribution.",
+      ],
+    },
+    {
+      surface: "perplexity/mac-app",
+      criterion: "workstation-return",
+      verdict: workstationReturned ? "proved" : "failed",
+      method: "chuck-workstation-lease",
+      evidence: `returnTarget=${workstationReturnEvidence({
+        workstation,
+        workstationReturnResult,
+      })}`,
+      checkedAt,
+      caveats: workstationReturned
+        ? []
+        : ["restoreWorkstation did not complete before receipt emission"],
+    },
+  ];
+}
+
+function workstationReturnEvidence({ workstation, workstationReturnResult }) {
+  if (workstationReturnResult) {
+    return JSON.stringify({
+      ok: Boolean(workstationReturnResult.ok),
+      app: workstationReturnResult.app ?? null,
+      restored: workstationReturnResult.restored ?? null,
+      verification: workstationReturnResult.verification ?? null,
+    });
+  }
+  return workstation?.workstation?.app ?? workstation?.workstation?.bundleId ?? "unknown";
 }
 
 // Coordinates are expressed as screen-point ratios for Joseph's fullscreen
@@ -364,6 +438,46 @@ async function ocrLines(imagePath) {
   }
 }
 
+async function currentScreenText() {
+  const shot = join(tmpdir(), `perp-mac-screen-${Date.now()}.png`);
+  try {
+    await screenshot(shot);
+    const lines = await ocrLines(shot);
+    return lines.map((line) => String(line.text ?? "")).join("\n");
+  } finally {
+    try {
+      unlinkSync(shot);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+async function frontmostAppIdentity() {
+  const name = await osa(
+    'tell application "System Events" to get name of first application process whose frontmost is true',
+  ).catch(() => "");
+  const bundleId = await osa(
+    'tell application "System Events" to get bundle identifier of first application process whose frontmost is true',
+  ).catch(() => "");
+  return { name, bundleId };
+}
+
+async function assertPerplexityMacVisible() {
+  const frontmost = await frontmostAppIdentity();
+  if (frontmost.bundleId && frontmost.bundleId !== APP_BUNDLE_ID) {
+    throw new Error(
+      `Perplexity Mac activation failed: frontmost bundle is ${frontmost.bundleId || frontmost.name || "unknown"}, expected ${APP_BUNDLE_ID}`,
+    );
+  }
+  const text = await currentScreenText();
+  if (/\b(Grok|SuperGrok)\b/i.test(text)) {
+    throw new Error(
+      "Perplexity Mac surface collision: visible screen is Grok, not Perplexity. Another GUI driver likely owns the workstation.",
+    );
+  }
+}
+
 async function screenHasText(pattern) {
   const shot = join(tmpdir(), `perp-mac-ocr-${Date.now()}.png`);
   try {
@@ -379,6 +493,22 @@ async function screenHasText(pattern) {
       /* best effort */
     }
   }
+}
+
+async function detectPerplexityMacAccountProfile() {
+  await assertPerplexityMacVisible();
+  const maxMarker = await screenHasText(/\b(therivende85730|Perplexity Max|Subscribed|max)\b/i);
+  if (maxMarker) {
+    return "perplexity-shared-max-native-visible";
+  }
+  const degradedMarker = await screenHasText(
+    /\b(Upgrade plan|Free preview limit reached|Now using basic search)\b/i,
+  );
+  await assertPerplexityMacVisible();
+  if (degradedMarker) {
+    return "perplexity-shared-native-degraded-or-wrong-profile";
+  }
+  return "perplexity-shared-max-native-unverified";
 }
 
 async function clickScreenOcrLine(pattern) {
@@ -438,10 +568,17 @@ async function mainPaneOcrState() {
 // --- app / window control ------------------------------------------------
 
 async function activateApp() {
-  await execFileP("open", [APP_URL_SCHEME]);
+  // Open the native app by bundle id. Do not use the perplexity-app:// URL
+  // scheme here: on this Mac it can route through Chrome and silently turn
+  // `perplexity/mac-app` into `perplexity/web`, which collapses the account
+  // and transport attribution we are trying to prove.
+  await execFileP("open", ["-b", APP_BUNDLE_ID], {
+    timeout: 12_000,
+    killSignal: "SIGTERM",
+  });
   await sleep(1500);
-  await osa(`tell application "${APP_NAME}" to reopen`).catch(() => {});
-  await osa(`tell application "${APP_NAME}" to activate`);
+  await osa(`tell application id ${JSON.stringify(APP_BUNDLE_ID)} to reopen`).catch(() => {});
+  await osa(`tell application id ${JSON.stringify(APP_BUNDLE_ID)} to activate`);
   await sleep(500);
 }
 
@@ -1265,6 +1402,7 @@ export async function provePerplexityMacLease({
     ok: false,
     startedAt,
     endedAt: null,
+    authProfileId: null,
     originalIncognito: null,
     verifiedIncognito: null,
     freshThread: null,
@@ -1275,6 +1413,7 @@ export async function provePerplexityMacLease({
   try {
     await activateApp();
     await standardizeWindow();
+    proof.authProfileId = await detectPerplexityMacAccountProfile();
 
     originalIncognito = await setIncognitoState("ON");
     proof.originalIncognito = originalIncognito;
@@ -1372,6 +1511,7 @@ export async function canaryPerplexityMacReply({
     startedAt,
     endedAt: null,
     nonce,
+    authProfileId: null,
     originalIncognito: null,
     verifiedIncognito: null,
     freshThread: null,
@@ -1387,6 +1527,7 @@ export async function canaryPerplexityMacReply({
   try {
     await activateApp();
     await standardizeWindow();
+    proof.authProfileId = await detectPerplexityMacAccountProfile();
 
     originalIncognito = await setIncognitoState("ON");
     proof.originalIncognito = originalIncognito;
@@ -1483,10 +1624,14 @@ export async function askPerplexityMac({
   const workstation = await createWorkstationLease({ reason: "perplexity/mac-app" });
   let originalIncognito = null;
   let incognitoVerifiedBySettings = false;
+  let workstationReturned = false;
+  let workstationReturnResult = null;
+  let authProfileId = "perplexity-shared-max-native-unverified";
 
   try {
     await activateApp();
     await standardizeWindow();
+    authProfileId = await detectPerplexityMacAccountProfile();
 
     // ---- Incognito gate: ensure ON, remember original ----
     if (incognito) {
@@ -1533,6 +1678,7 @@ export async function askPerplexityMac({
     let lastReply = "";
     let stableTicks = 0;
     let incognitoConfirmed = incognitoVerifiedBySettings;
+    const surfaceProofRequested = /\bSURFACE_PROOF_OK\b/.test(String(prompt));
     const tmp = tmpdir();
     while (Date.now() - t0 < pollUntilStableMs) {
       const shot = join(tmp, `perp-mac-${Date.now()}.png`);
@@ -1553,7 +1699,19 @@ export async function askPerplexityMac({
       process.stderr.write(
         `[perp-mac] tick: len=${state.reply.length} streaming=${state.streaming} incog-banner=${state.incognito}\n`,
       );
-      const shortProofToken = /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(state.reply);
+      const requiredSurfaceProofSeen = /\bSURFACE_PROOF_OK\b/.test(state.reply);
+      if (surfaceProofRequested && state.reply && !requiredSurfaceProofSeen) {
+        process.stderr.write(
+          "[perp-mac] waiting for requested SURFACE_PROOF_OK token; ignoring stale or unrelated reply\n",
+        );
+        stableTicks = 0;
+        lastReply = state.reply;
+        await sleep(tickMs);
+        continue;
+      }
+      const shortProofToken = surfaceProofRequested
+        ? requiredSurfaceProofSeen
+        : /\b(?:SURFACE_PROOF_OK|APEXOK[A-Z0-9]+)\b/.test(state.reply);
       if (
         !state.streaming &&
         state.reply &&
@@ -1584,9 +1742,28 @@ export async function askPerplexityMac({
             threadState,
             modelUsed,
           });
+          try {
+            workstationReturnResult = await restoreWorkstation(workstation);
+            workstationReturned = Boolean(workstationReturnResult?.ok);
+          } catch (error) {
+            process.stderr.write(
+              `[perp-mac] workstation return failed before receipt: ${error?.message ?? error}\n`,
+            );
+          }
           return {
             text: state.reply,
             modelUsed,
+            authProfileId,
+            transportProofs: transportProofsForPerplexityMac({
+              mode,
+              incognitoConfirmed,
+              threadState,
+              modelUsed,
+              workstation,
+              workstationReturned,
+              workstationReturnResult,
+              authProfileId,
+            }),
           };
         }
       } else {
@@ -1618,7 +1795,9 @@ export async function askPerplexityMac({
     if (typeof savedPb === "string") {
       await pbcopy(savedPb).catch(() => {});
     }
-    await restoreWorkstation(workstation).catch(() => {});
+    if (!workstationReturned) {
+      await restoreWorkstation(workstation).catch(() => {});
+    }
   }
 }
 
@@ -1994,10 +2173,13 @@ async function mainCli() {
   let replyCanaryNoRestore = false;
   let replyCanaryAllowNoBanner = false;
   let replyCanaryNonce;
+  let asJson = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--mode") {
       mode = args[++i] ?? "research";
+    } else if (a === "--json") {
+      asJson = true;
     } else if (a === "--no-incognito") {
       incognito = false;
     } else if (a === "--image") {
@@ -2049,7 +2231,7 @@ async function mainCli() {
   }
   if (!prompt) {
     console.error(
-      "Usage: research-perplexity-mac.mjs [--doctor|--reply-canary] [--mode research|labs] [--thread-policy auto|reuse|fresh|reset] [--no-incognito] [--image [--model M] [--out-dir D]] '<prompt>'",
+      "Usage: research-perplexity-mac.mjs [--doctor|--reply-canary] [--json] [--mode research|labs] [--thread-policy auto|reuse|fresh|reset] [--no-incognito] [--image [--model M] [--out-dir D]] '<prompt>'",
     );
     process.exit(2);
   }
@@ -2063,7 +2245,7 @@ async function mainCli() {
     return;
   }
   const r = await askPerplexityMac({ prompt, mode, incognito, threadPolicy });
-  process.stdout.write(r.text + "\n");
+  process.stdout.write(asJson ? JSON.stringify(r, null, 2) + "\n" : r.text + "\n");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

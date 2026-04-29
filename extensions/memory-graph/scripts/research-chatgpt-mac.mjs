@@ -687,20 +687,30 @@ async function visionAsk({ imagePath, prompt, timeoutMs = 90_000 }) {
 }
 
 async function readReplyState(imagePath) {
+  // Two-pass extraction. The single-prompt JSON-format request caused
+  // Vision to over-cautiously return empty reply even when the assistant
+  // turn was visible (caught 2026-04-28 via CHUCK_CHATGPT_MAC_DEBUG —
+  // freeform "describe this" returned the full reply, JSON-format
+  // returned ""). Workaround: ask freeform for description, then tail
+  // a JSON line. Costs one extra Vision call per tick but recovers the
+  // entire reply path for chatgpt-mac.
   const prompt = [
-    "You are inspecting a screenshot of the ChatGPT Mac desktop app's chat view.",
-    "The user has sent a single prompt and is waiting for the assistant's reply.",
-    "Answer strictly as JSON on a single line, no prose, no code fences:",
+    "Describe this screenshot of the ChatGPT macOS app. I need:",
+    "1. Is there a visible assistant reply on screen? (the AI's response, typically left-aligned, below the user's question)",
+    "2. If yes, quote the assistant's reply VERBATIM (preserve newlines).",
+    "3. Is the assistant currently generating? (look for a stop-button, typing cursor, or 'Stop generating' UI)",
     "",
-    '{ "reply": "<the assistant\'s full reply text verbatim, or empty string if no reply yet>",',
-    '  "streaming": <true if a stop-button/spinner/typing-cursor/"Stop generating" UI indicates generation is in progress, else false> }',
+    "Format your response with the prose first, THEN end with one line of JSON like this:",
     "",
-    `IMPORTANT: ignore any text inside a user-message bubble (it begins with our sentinel "${PROMPT_PREFIX.trim()}"). Only return the assistant's reply text.`,
-    'Do NOT include "Sources", "Suggestions", "Related questions", or follow-up chip text in "reply" — only the assistant\'s main answer body.',
-    'If the app is in an error/empty/settings/loading/login state with no assistant turn, set reply to "" and streaming to false.',
+    'JSON: {"reply": "<verbatim assistant reply or empty string>", "streaming": <true/false>}',
+    "",
+    "Use \\n for newlines inside the reply string. The JSON line must be the LAST line of your output.",
   ].join("\n");
   const raw = await visionAsk({ imagePath, prompt });
-  const m = raw.match(/\{[\s\S]*\}/);
+  // Find the LAST JSON object in the output (the prefix line is
+  // "JSON: " but we just match the JSON itself).
+  const matches = [...raw.matchAll(/\{[\s\S]*?\}/g)];
+  const m = matches[matches.length - 1];
   if (!m) {
     return { reply: "", streaming: false, raw };
   }
@@ -795,12 +805,45 @@ export async function askChatGPTMac({
     let lastReply = "";
     let stableTicks = 0;
     const tmp = tmpdir();
+    // CHUCK_CHATGPT_MAC_DEBUG=1 dumps every tick's screenshot to
+    // ~/Documents/chatgpt-mac-debug/<runId>/<ticks>.png so we can see
+    // what Vision actually receives. Crucial for debugging the len=0
+    // failure mode where Vision returns empty reply but we can't tell
+    // if the chat is empty or Vision is misreading.
+    const debugMode = process.env.CHUCK_CHATGPT_MAC_DEBUG === "1";
+    let debugDir = null;
+    let tickIdx = 0;
+    if (debugMode) {
+      const { mkdirSync } = await import("node:fs");
+      const runId = new Date().toISOString().replaceAll(":", "-").slice(0, 19);
+      debugDir = join(homedir(), "Documents", "chatgpt-mac-debug", runId);
+      try {
+        mkdirSync(debugDir, { recursive: true });
+        process.stderr.write(`[chatgpt-mac] DEBUG screenshot dump → ${debugDir}\n`);
+      } catch (e) {
+        process.stderr.write(`[chatgpt-mac] DEBUG dir create failed: ${e?.message ?? e}\n`);
+        debugDir = null;
+      }
+    }
     while (Date.now() - t0 < pollUntilStableMs) {
       const shot = join(tmp, `chatgpt-mac-${Date.now()}.png`);
       let state;
       try {
         await screenshot(shot, { region: runtimeReplyCrop() });
         state = await readReplyState(shot);
+        if (debugDir) {
+          tickIdx += 1;
+          const debugCopy = join(
+            debugDir,
+            `tick-${String(tickIdx).padStart(3, "0")}-len${state.reply.length}-streaming${state.streaming}.png`,
+          );
+          try {
+            const { copyFileSync } = await import("node:fs");
+            copyFileSync(shot, debugCopy);
+          } catch {
+            /* best-effort */
+          }
+        }
       } finally {
         try {
           unlinkSync(shot);

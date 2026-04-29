@@ -183,22 +183,29 @@ async function realKeyboardSubmit(tab, prompt) {
   }
 }
 
-// Count grok assistant turns. Used to gate readReply so the poller only
-// considers the reader "ready" once a NEW turn has appeared after submit.
-// Without this gate the prompt-echo + suffix-question block in the user
-// bubble can be returned as the "reply" (caught 2026-04-28 smoke).
-const GROK_TURN_SELECTORS = [
-  '[data-message-author-role="assistant"]',
-  '[class*="assistant" i][class*="message" i]',
-  '[class*="response" i][class*="message" i]',
-  "main article",
-  "article",
-].join(", ");
-
+// Live-DOM verified 2026-04-28: Grok uses `.response-content-markdown`
+// for BOTH user AND assistant message content. The differentiator is
+// the alignment wrapper (4 ancestors up): `items-start` = assistant,
+// `items-end` = user. No data-message-author-role attribute exists.
+// Earlier selector list (data-message-author-role, article, etc.)
+// returned 0 matches — Grok's DOM doesn't use those patterns.
 async function assistantCount(tab) {
   const r = await evalInTab(
     tab,
-    `return document.querySelectorAll(${JSON.stringify(GROK_TURN_SELECTORS)}).length;`,
+    `
+    var nodes = document.querySelectorAll('.response-content-markdown');
+    var count = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var p = nodes[i];
+      for (var j = 0; j < 6 && p; j++) {
+        var cls = (p.className && p.className.toString) ? p.className.toString() : '';
+        if (cls.indexOf('items-start') >= 0) { count++; break; }
+        if (cls.indexOf('items-end') >= 0) break;
+        p = p.parentElement;
+      }
+    }
+    return count;
+  `,
   );
   return Number(r.value ?? 0);
 }
@@ -271,30 +278,24 @@ async function submitPrompt(tab, prompt) {
   return { before };
 }
 
-async function readReply(tab, { prompt = "", minAssistantCount = 0 } = {}) {
+async function readReply(tab, { prompt: _prompt = "", minAssistantCount = 0 } = {}) {
   const r = await evalInTab(
     tab,
     `
-    var promptText = ${JSON.stringify(prompt)};
     var minCount = ${minAssistantCount};
-    var turnSel = ${JSON.stringify(GROK_TURN_SELECTORS)};
     function clean(raw) {
       var lines = String(raw || "").split("\\n").map(function(line) { return line.trim(); }).filter(Boolean);
       var out = [];
       var drop = [
         /^\\d+(?:\\.\\d+)?\\s*(?:ms|s)$/i,
-        /^clarify\\b/i,
-        /^explore\\b/i,
-        /^expand on\\b/i,
-        /^tell me about\\b/i,
-        /^are you satisfied\\b/i,
-        /^you.ve reached your full speed limit/i,
-        /^try supergrok/i,
-        /^upgrade to supergrok/i,
-        /^fast$/i,
+        /^edit$/i,
+        /^copy$/i,
         /^like$/i,
         /^dislike$/i,
-        /^share$/i
+        /^share$/i,
+        /^try supergrok/i,
+        /^upgrade to supergrok/i,
+        /^you.ve reached your full speed limit/i
       ];
       for (var line of lines) {
         var isChrome = drop.some(function(rx) { return rx.test(line); });
@@ -304,26 +305,29 @@ async function readReply(tab, { prompt = "", minAssistantCount = 0 } = {}) {
       }
       return out.join("\\n").trim();
     }
-    function isPromptEcho(text) {
-      if (!promptText) return false;
-      var head = promptText.slice(0, 120).replace(/\\s+/g, " ");
-      var t = text.replace(/\\s+/g, " ");
-      return t.startsWith(head);
+    // Find assistant turns: .response-content-markdown elements whose
+    // alignment ancestor (within 6 levels up) has 'items-start' class.
+    var allNodes = document.querySelectorAll('.response-content-markdown');
+    var assistantNodes = [];
+    for (var i = 0; i < allNodes.length; i++) {
+      var p = allNodes[i];
+      var role = '';
+      for (var j = 0; j < 6 && p; j++) {
+        var cls = (p.className && p.className.toString) ? p.className.toString() : '';
+        if (cls.indexOf('items-start') >= 0) { role = 'assistant'; break; }
+        if (cls.indexOf('items-end') >= 0) { role = 'user'; break; }
+        p = p.parentElement;
+      }
+      if (role === 'assistant') assistantNodes.push(allNodes[i]);
     }
-    var msgs = Array.from(document.querySelectorAll(turnSel));
-    // The new assistant turn is everything past minCount. Pick the last
-    // non-prompt-echo candidate.
     var text = "";
-    for (var i = msgs.length - 1; i >= 0; i--) {
-      var candidate = clean(msgs[i].innerText || msgs[i].textContent || "");
-      if (!candidate) continue;
-      if (isPromptEcho(candidate)) continue;
-      text = candidate;
-      break;
+    if (assistantNodes.length > 0) {
+      var last = assistantNodes[assistantNodes.length - 1];
+      text = clean(last.innerText || last.textContent || "");
     }
     var stop = document.querySelector('button[aria-label*="Stop" i]') || document.querySelector('button[data-testid*="stop"]');
     var send = document.querySelector('button[aria-label="Submit"][type="submit"]') || document.querySelector('button[type="submit"]');
-    var countReady = msgs.length > minCount;
+    var countReady = assistantNodes.length > minCount;
     var streaming = !!stop || !countReady || !text || (send && send.disabled && !text);
     return { text: text.trim(), streaming: streaming };
   `,

@@ -8,23 +8,26 @@
 // prompt through the same channels, and the replies should land in
 // consistent filenames so downstream diffing and synthesis are trivial.
 //
-// Voices driven (in parallel) — 11-voice panel as of 2026-04-28:
+// Voices driven (in parallel) — 13-voice panel as of 2026-04-28:
 //   Anthropic family
-//     - claude-cli      : Opus 4.7 via `claude -p --model opus` (Max sub)
-//     - claude-ai       : Opus 4.7 Adaptive via claude.ai web chat
+//     - claude-cli         : Opus 4.7 via `claude -p --model opus` (Max sub)
+//     - claude-ai          : Opus 4.7 Adaptive via claude.ai web chat
+//     - claude-design-pwa  : claude.ai/design PWA (Opus 4.7 Adaptive, design-mode)
 //   OpenAI family
-//     - chatgpt-web     : GPT-5.5 via chatgpt.com web chat
-//     - chatgpt-mac     : GPT-5.5 via ChatGPT.app native macOS app
-//     - codex           : codex/gpt-5.5 via Codex CLI (repo-grounded)
+//     - chatgpt-web        : GPT-5.5 via chatgpt.com web chat
+//     - chatgpt-mac        : GPT-5.5 via ChatGPT.app native macOS app
+//     - codex              : codex/gpt-5.5 via Codex CLI (repo-grounded)
 //   Google family
-//     - gemini-cli      : Gemini 3.1 Pro via `gemini` CLI (AI Pro)
-//     - gemini-web      : Gemini 3.1 Pro via gemini.google.com web chat
-//     - aistudio-web    : Gemini Pro variants via aistudio.google.com
+//     - gemini-cli         : Gemini 3.1 Pro via `gemini` CLI (AI Pro)
+//     - gemini-web         : Gemini 3.1 Pro via gemini.google.com web chat (PWA)
+//     - aistudio-web       : Gemini Pro variants via aistudio.google.com (PWA)
 //   xAI family
-//     - grok-web        : Grok via grok.com web chat
+//     - grok-web           : Grok via grok.com web chat (PWA)
 //   Perplexity family
-//     - perplexity-web  : Perplexity Pro via perplexity.ai web chat
-//     - perplexity-mac  : Perplexity Pro via Perplexity.app native (incognito)
+//     - perplexity-web     : Perplexity Pro via perplexity.ai web chat
+//     - perplexity-mac     : Perplexity Pro via Perplexity.app native (incognito)
+//   Local family (sovereign / offline)
+//     - ollama-local       : qwen3:8b (or CHUCK_OLLAMA_MODEL) via local ollama runtime
 //
 // Usage:
 //   apex-panel-ask.mjs --file <path>              Prompt-body from file
@@ -118,6 +121,17 @@ const VOICES = {
     modelName: "claude-opus-4-7",
     run: runClaudeCli,
   },
+  // Claude CLI with claude.ai web-chat parity system prompt — restores
+  // the conversational claude.ai fingerprint (warm/concise/paragraph-default
+  // tone, web-mode capability framing, knowledge-cutoff statement) on
+  // top of the unmetered Max-CLI substrate. Wired 2026-04-29 per Phase
+  // 2B of the API-vs-UI migration vote synthesis: prevents the panel
+  // from homogenizing when claude-cli replaces claude-ai for raw text.
+  "claude-cli-web-styled": {
+    label: "Opus-47-CLI-WebStyled",
+    modelName: "claude-opus-4-7 (claude.ai parity)",
+    run: runClaudeCliWebStyled,
+  },
   "chatgpt-web": {
     label: "ChatGPT-Web",
     modelName: "chatgpt-plus/web-chat",
@@ -197,6 +211,46 @@ const VOICES = {
     modelName: "perplexity-mac-app/research",
     run: runPerplexityMac,
   },
+  // (claude-design-pwa removed 2026-04-29 per unanimous fleet vote
+  // ApiVsUiVote-SYNTHESIS — same surface as claude-ai with /design URL
+  // prefix; claude-cli covers the raw model, claude-ai covers Artifacts.
+  // Zero unique capability; pure redundancy. The runClaudeDesignPwa
+  // helper is retained in case Joseph ever wants to re-wire as a separate
+  // design-task voice with a distinguishing system prompt.)
+
+  // Ollama local — offline/private/sovereign voice via local ollama
+  // runtime. Default model qwen3:8b (latest general-purpose). Joseph
+  // also has llama3.1:8b installed. No network required, no quota,
+  // unlimited iteration. Slowest of the panel (CPU/GPU bound) but
+  // the only fully-offline path. Wired 2026-04-28.
+  "ollama-local": {
+    label: "Ollama-Local",
+    modelName: "ollama/qwen3:8b",
+    run: runOllamaLocal,
+  },
+  // Comet — Perplexity's Chromium-based browser at ai.perplexity.comet.
+  // Driver built by codex 2026-04-28 after we coordinated load-share:
+  // local AppleScript wrappers (doesn't touch shared apex-chrome-lib),
+  // own JS gate already flipped via cliclick chain earlier this session.
+  // Smoke verified: COMET_SMOKE_OK roundtrip. Distinct surface from
+  // perplexity-web (different account scoping + computer-use access).
+  "comet-web": {
+    label: "Comet-Web",
+    modelName: "perplexity-comet/web-chat",
+    run: runCometChat,
+  },
+  // NotebookLM — Google's notebook synthesis surface (notebooklm.google.com).
+  // Joseph holds NotebookLM Pro + 10 existing notebooks (445+ sources in
+  // some). Distinct from gemini-web/aistudio-web: source-grounded answers,
+  // multi-doc synthesis, Audio Overview generation. Driver built
+  // 2026-04-28 (research-notebooklm-chat.mjs). Targets a designated
+  // scratch notebook via env CHUCK_NOTEBOOKLM_NOTEBOOK; falls back to
+  // most-recent notebook when unset.
+  "notebooklm-web": {
+    label: "NotebookLM-Web",
+    modelName: "notebooklm/notebook-chat",
+    run: runNotebookLm,
+  },
 };
 
 function parseArgs(argv) {
@@ -207,6 +261,7 @@ function parseArgs(argv) {
     label: null,
     suffix: null,
     only: null,
+    mode: "raw",
   };
   for (let i = 0; i < a.length; i++) {
     const t = a[i];
@@ -220,7 +275,12 @@ function parseArgs(argv) {
       out.suffix = a[++i];
     } else if (t === "--only") {
       out.only = a[++i];
+    } else if (t === "--mode") {
+      out.mode = a[++i];
     }
+  }
+  if (!["raw", "synthesize"].includes(out.mode)) {
+    throw new Error(`unknown --mode: ${out.mode} (use raw|synthesize)`);
   }
   return out;
 }
@@ -252,6 +312,22 @@ async function runClaudeCli(prompt) {
   return runCli("claude", ["-p", "--model", "opus"], prompt);
 }
 
+async function runClaudeCliWebStyled(prompt) {
+  // Phase 2B: claude.ai web-chat parity. Replace Claude Code's default
+  // agentic-coder system prompt with a behavioral mirror of claude.ai's
+  // web fingerprint. Spawns from /tmp cwd to suppress CLAUDE.md
+  // auto-discovery (otherwise the openclaw repo CLAUDE.md would inject
+  // into the user message context and contaminate the parity).
+  const { claudeWebParitySystemPrompt } = await import("./apex-claude-web-parity-prompt.mjs");
+  const sysPrompt = claudeWebParitySystemPrompt();
+  return runCliCwd(
+    "claude",
+    ["-p", "--model", "opus", "--system-prompt", sysPrompt],
+    prompt,
+    "/tmp",
+  );
+}
+
 async function runGeminiCli(prompt) {
   // Gemini CLI changed -p contract: now requires the prompt as its argument
   // (previously read from stdin). Pass the prompt inline; runCli still
@@ -279,8 +355,16 @@ async function runCodexCli(prompt) {
 }
 
 async function runCli(bin, args, prompt) {
+  return runCliCwd(bin, args, prompt, undefined);
+}
+
+async function runCliCwd(bin, args, prompt, cwd) {
   return new Promise((resolve, reject) => {
-    const ps = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const opts = { stdio: ["pipe", "pipe", "pipe"] };
+    if (cwd) {
+      opts.cwd = cwd;
+    }
+    const ps = spawn(bin, args, opts);
     let stdout = "";
     let stderr = "";
     ps.stdout.on("data", (d) => (stdout += d.toString()));
@@ -346,6 +430,26 @@ async function runPerplexityMac(prompt) {
   return r;
 }
 
+async function runOllamaLocal(prompt) {
+  // ollama CLI is fully non-interactive when given the prompt as a
+  // positional arg. Default model qwen3:8b — switch via env knob
+  // CHUCK_OLLAMA_MODEL if needed.
+  const model = process.env.CHUCK_OLLAMA_MODEL ?? "qwen3:8b";
+  return runCli("/opt/homebrew/bin/ollama", ["run", model], prompt);
+}
+
+async function runCometChat(prompt) {
+  const mod = await import("./research-comet-chat.mjs");
+  const r = await mod.askCometChat({ prompt });
+  return r;
+}
+
+async function runNotebookLm(prompt) {
+  const mod = await import("./research-notebooklm-chat.mjs");
+  const r = await mod.askNotebookLm({ prompt });
+  return r;
+}
+
 function filenameFor(labelStem, voiceLabel) {
   return join(DOCS, `${labelStem}-${voiceLabel}-${TODAY}.md`);
 }
@@ -374,7 +478,27 @@ async function main() {
     process.stderr.write(`[panel-ask] bus emit (prompt) failed: ${err?.message ?? err}\n`);
   }
 
-  const tasks = wantedVoices.map(async (id) => {
+  // Stagger Chrome-driven voices to avoid CDP-port saturation when many
+  // PWAs spawn at once. CLI/API and Mac-app voices fire immediately.
+  // Vote 2026-04-29 demonstrated the burst: 8 simultaneous Chrome
+  // launches → all 8 voices died with "CDP did not come up within
+  // 12000ms on port 9222". Stagger window default 800ms, tunable via
+  // CHUCK_PANEL_STAGGER_MS.
+  const NO_STAGGER = new Set([
+    "claude-cli", "claude-cli-web-styled", "gemini-cli", "codex", "ollama-local",
+    "chatgpt-mac", "perplexity-mac",
+  ]);
+  const STAGGER_MS = Number(process.env.CHUCK_PANEL_STAGGER_MS ?? 800);
+  let chromeIdx = 0;
+  const voiceMeta = wantedVoices.map((id) => {
+    const staggerIdx = NO_STAGGER.has(id) ? -1 : chromeIdx++;
+    return { id, staggerIdx };
+  });
+
+  const tasks = voiceMeta.map(async ({ id, staggerIdx }) => {
+    if (staggerIdx > 0 && STAGGER_MS > 0) {
+      await new Promise((r) => setTimeout(r, staggerIdx * STAGGER_MS));
+    }
     const voice = VOICES[id];
     if (!voice) {
       return { id, skipped: true, error: "unknown voice" };
@@ -403,7 +527,7 @@ async function main() {
       } catch (busErr) {
         process.stderr.write(`[panel-ask] bus emit (${id} reply) failed: ${busErr?.message ?? busErr}\n`);
       }
-      return { id, ok: true, path, chars: text.length, ms: Date.now() - t0 };
+      return { id, ok: true, path, chars: text.length, ms: Date.now() - t0, text, label: voice.label };
     } catch (err) {
       const errMsg = String(err?.message ?? err);
       // Emit failure as a bus event too — degraded turns are forensics-relevant
@@ -414,7 +538,90 @@ async function main() {
     }
   });
   const results = await Promise.all(tasks);
-  console.log(JSON.stringify({ labelStem, session_id, results }, null, 2));
+
+  // Synthesize mode (--mode synthesize): after all voices reply, fire
+  // claude-cli (Opus 4.7) with all replies as context to produce ONE
+  // coherent answer with attribution preserved. Skipped if fewer than 2
+  // voices succeeded (single-voice synthesis is meaningless).
+  let synthesis = null;
+  if (opts.mode === "synthesize") {
+    const successes = results.filter((r) => r.ok && r.text);
+    if (successes.length < 2) {
+      process.stderr.write(
+        `[panel-ask] synthesize: skipping — only ${successes.length} successful voice(s); need at least 2.\n`,
+      );
+      synthesis = { skipped: true, reason: `only ${successes.length} voices succeeded` };
+    } else {
+      const synthPrompt = [
+        "You are synthesizing a multi-model panel assessment.",
+        "",
+        "Below is the original prompt, then verbatim replies from different frontier AI models. Your job is to produce ONE coherent answer that preserves attribution — when the panel converges, say so; when it diverges, surface the divergence and flag whose call you trust and why.",
+        "",
+        "Format:",
+        "1. Headline take (1-3 sentences).",
+        "2. What the panel agrees on, with which voices agreed.",
+        "3. Where they diverge, with each voice's distinct claim attributed.",
+        "4. Your recommendation — pick a side or steelman both, but commit.",
+        "",
+        "Don't flatter; don't repeat boilerplate; cite voices by their label (e.g., \"Gemini-Web said\", \"Codex-CLI argued\").",
+        "",
+        "<original_prompt>",
+        prompt,
+        "</original_prompt>",
+        "",
+        "<panel_replies>",
+        ...successes.map((r) =>
+          [`<voice id="${r.id}" label="${r.label}" chars="${r.chars}">`, r.text, "</voice>"].join("\n"),
+        ),
+        "</panel_replies>",
+      ].join("\n");
+
+      process.stderr.write(
+        `[panel-ask] synthesize: dispatching to claude-cli (synthPrompt ${synthPrompt.length} chars over ${successes.length} voices)\n`,
+      );
+
+      const t0 = Date.now();
+      try {
+        const r = await runClaudeCli(synthPrompt);
+        const text = r.text ?? "";
+        const path = filenameFor(labelStem, "SYNTHESIS");
+        const body = [
+          `# SYNTHESIS — ${labelStem}`,
+          ``,
+          `Synthesizer: claude-opus-4-7 (claude-cli)`,
+          `Voices folded in: ${successes.map((s) => s.label).join(", ")}`,
+          `Retrieved: ${new Date().toISOString()}`,
+          `Latency: ${Date.now() - t0}ms`,
+          ``,
+          `---`,
+          ``,
+          text,
+        ].join("\n");
+        writeFileSync(path, body, "utf8");
+        try {
+          await busEmit({
+            session_id,
+            voice_id: "synthesizer",
+            role: "reply",
+            content: text,
+            mode: "synthesize",
+          });
+        } catch {
+          /* ignore */
+        }
+        synthesis = { ok: true, path, chars: text.length, ms: Date.now() - t0, voices: successes.map((s) => s.id) };
+      } catch (err) {
+        const errMsg = String(err?.message ?? err);
+        process.stderr.write(`[panel-ask] synthesize: claude-cli failed — ${errMsg}\n`);
+        synthesis = { ok: false, error: errMsg, ms: Date.now() - t0 };
+      }
+    }
+  }
+
+  // Strip the verbose `text` field from results before logging — it's
+  // duplicative (saved to file) and would clutter JSON output.
+  const summarized = results.map(({ text: _, ...rest }) => rest);
+  console.log(JSON.stringify({ labelStem, session_id, mode: opts.mode, results: summarized, synthesis }, null, 2));
   const failed = results.filter((r) => !r.ok && !r.skipped);
   if (failed.length === results.length) {
     process.exitCode = 1;
