@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import { sanitizeForLog } from "../../terminal/ansi.js";
 import { resolveMessageChannel } from "../../utils/message-channel.js";
@@ -28,6 +29,7 @@ import { buildAgentRuntimeAuthPlan } from "../runtime-plan/auth.js";
 import { buildWorkspaceSkillSnapshot } from "../skills.js";
 import { buildUsageWithNoCost } from "../stream-message-shared.js";
 import {
+  buildClaudeCliFallbackContextPrelude,
   claudeCliSessionTranscriptHasContent,
   resolveFallbackRetryPrompt,
 } from "./attempt-execution.helpers.js";
@@ -238,6 +240,7 @@ export async function persistCliTurnTranscript(params: {
 export async function runAgentAttempt(params: {
   providerOverride: string;
   modelOverride: string;
+  originalProvider: string;
   cfg: OpenClawConfig;
   sessionEntry: SessionEntry | undefined;
   sessionId: string;
@@ -257,52 +260,69 @@ export async function runAgentAttempt(params: {
   skillsSnapshot: ReturnType<typeof buildWorkspaceSkillSnapshot> | undefined;
   resolvedVerboseLevel: VerboseLevel | undefined;
   agentDir: string;
-  onAgentEvent: (evt: { stream: string; data?: Record<string, unknown> }) => void;
+  onAgentEvent: (evt: {
+    stream: string;
+    data?: Record<string, unknown>;
+    sessionKey?: string;
+  }) => void;
   authProfileProvider: string;
   sessionStore?: Record<string, SessionEntry>;
   storePath?: string;
   allowTransientCooldownProbe?: boolean;
   sessionHasHistory?: boolean;
 }) {
-  const effectivePrompt = resolveFallbackRetryPrompt({
+  const isRawModelRun = params.opts.modelRun === true || params.opts.promptMode === "none";
+  const claudeCliFallbackPrelude =
+    !isRawModelRun &&
+    params.isFallbackRetry &&
+    isClaudeCliProvider(params.originalProvider) &&
+    !isClaudeCliProvider(params.providerOverride)
+      ? buildClaudeCliFallbackContextPrelude({
+          cliSessionId: getCliSessionBinding(params.sessionEntry, "claude-cli")?.sessionId,
+        })
+      : "";
+  const resolvedPrompt = resolveFallbackRetryPrompt({
     body: params.body,
     isFallbackRetry: params.isFallbackRetry,
     sessionHasHistory: params.sessionHasHistory,
+    priorContextPrelude: claudeCliFallbackPrelude,
   });
+  const effectivePrompt = isRawModelRun
+    ? resolvedPrompt
+    : annotateInterSessionPromptText(resolvedPrompt, params.opts.inputProvenance);
   const bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
     params.sessionEntry?.systemPromptReport,
   );
   const bootstrapPromptWarningSignature =
     bootstrapPromptWarningSignaturesSeen[bootstrapPromptWarningSignaturesSeen.length - 1];
 
-  // Run plugin `before_model_resolve` hooks before the CLI-vs-embedded
-  // dispatch decision. This lets memory-graph (and other plugins) steer
-  // the turn's provider/model while preserving the caller's request when
-  // hooks return no override.
   let effectiveProvider = params.providerOverride;
   let effectiveModel = params.modelOverride;
-  const hookRunner = getGlobalHookRunner();
-  if (hookRunner?.hasHooks("before_model_resolve")) {
+
+  if (!isRawModelRun) {
+    const hookRunner = getGlobalHookRunner();
     try {
-      const attachments = buildBeforeModelResolveAttachments(params.opts.images);
-      const hookSelection = await resolveHookModelSelection({
-        prompt: effectivePrompt,
-        ...(attachments ? { attachments } : {}),
-        provider: effectiveProvider,
-        modelId: effectiveModel,
-        hookRunner,
-        hookContext: {
-          agentId: params.sessionAgentId,
-          sessionKey: params.sessionKey,
-          sessionId: params.sessionId,
-          workspaceDir: params.workspaceDir,
-          messageProvider: params.messageChannel,
-          trigger: "user",
-          channelId: params.messageChannel,
-        },
-      });
-      effectiveProvider = hookSelection.provider;
-      effectiveModel = hookSelection.modelId;
+      if (hookRunner?.hasHooks("before_model_resolve")) {
+        const attachments = buildBeforeModelResolveAttachments(params.opts.images);
+        const hookSelection = await resolveHookModelSelection({
+          prompt: effectivePrompt,
+          ...(attachments ? { attachments } : {}),
+          provider: effectiveProvider,
+          modelId: effectiveModel,
+          hookRunner,
+          hookContext: {
+            agentId: params.sessionAgentId,
+            sessionKey: params.sessionKey,
+            sessionId: params.sessionId,
+            workspaceDir: params.workspaceDir,
+            messageProvider: params.messageChannel,
+            trigger: "user",
+            channelId: params.messageChannel,
+          },
+        });
+        effectiveProvider = hookSelection.provider;
+        effectiveModel = hookSelection.modelId;
+      }
     } catch (err) {
       log.warn(
         `before_model_resolve hook failed in attempt-execution; using caller's primary: ${String(err)}`,
@@ -310,29 +330,36 @@ export async function runAgentAttempt(params: {
     }
   }
 
-  const sessionPinnedAgentHarnessId = resolveSessionPinnedAgentHarnessId({
-    cfg: params.cfg,
-    sessionAgentId: params.sessionAgentId,
-    sessionEntry: params.sessionEntry,
-    sessionHasHistory: params.sessionHasHistory,
-    sessionId: params.sessionId,
-    sessionKey: params.sessionKey ?? params.sessionId,
-  });
-  const agentRuntimeOverride = params.sessionEntry?.agentRuntimeOverride?.trim();
-  const cliExecutionProvider =
-    resolveCliRuntimeExecutionProvider({
-      provider: effectiveProvider,
-      cfg: params.cfg,
-      agentId: params.sessionAgentId,
-      runtimeOverride: agentRuntimeOverride,
-    }) ?? effectiveProvider;
-  const agentHarnessPolicy = resolveAgentHarnessPolicy({
-    provider: effectiveProvider,
-    modelId: effectiveModel,
-    config: params.cfg,
-    agentId: params.sessionAgentId,
-    sessionKey: params.sessionKey ?? params.sessionId,
-  });
+  const sessionPinnedAgentHarnessId = isRawModelRun
+    ? "pi"
+    : resolveSessionPinnedAgentHarnessId({
+        cfg: params.cfg,
+        sessionAgentId: params.sessionAgentId,
+        sessionEntry: params.sessionEntry,
+        sessionHasHistory: params.sessionHasHistory,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey ?? params.sessionId,
+      });
+  const agentRuntimeOverride = isRawModelRun
+    ? undefined
+    : params.sessionEntry?.agentRuntimeOverride?.trim();
+  const cliExecutionProvider = isRawModelRun
+    ? effectiveProvider
+    : (resolveCliRuntimeExecutionProvider({
+        provider: effectiveProvider,
+        cfg: params.cfg,
+        agentId: params.sessionAgentId,
+        runtimeOverride: agentRuntimeOverride,
+      }) ?? effectiveProvider);
+  const agentHarnessPolicy = isRawModelRun
+    ? ({ runtime: "pi", fallback: "pi" } as const)
+    : resolveAgentHarnessPolicy({
+        provider: effectiveProvider,
+        modelId: effectiveModel,
+        config: params.cfg,
+        agentId: params.sessionAgentId,
+        sessionKey: params.sessionKey ?? params.sessionId,
+      });
   const runtimeAuthPlan = buildAgentRuntimeAuthPlan({
     provider: effectiveProvider,
     authProfileProvider: params.authProfileProvider,
@@ -344,7 +371,7 @@ export async function runAgentAttempt(params: {
     allowHarnessAuthProfileForwarding: !isCliProvider(cliExecutionProvider, params.cfg),
   });
   const authProfileId = runtimeAuthPlan.forwardedAuthProfileId;
-  if (isCliProvider(cliExecutionProvider, params.cfg)) {
+  if (!isRawModelRun && isCliProvider(cliExecutionProvider, params.cfg)) {
     const cliSessionBinding = getCliSessionBinding(params.sessionEntry, cliExecutionProvider);
     const resolveReusableCliSessionBinding = async () => {
       if (
@@ -390,6 +417,7 @@ export async function runAgentAttempt(params: {
         timeoutMs: params.timeoutMs,
         runId: params.runId,
         extraSystemPrompt: params.opts.extraSystemPrompt,
+        inputProvenance: params.opts.inputProvenance,
         cliSessionId: nextCliSessionId,
         cliSessionBinding:
           nextCliSessionId === activeCliSessionBinding?.sessionId
@@ -406,6 +434,8 @@ export async function runAgentAttempt(params: {
         messageProvider: params.messageChannel,
         agentAccountId: params.runContext.accountId,
         senderIsOwner: params.opts.senderIsOwner,
+        cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
+        cleanupCliLiveSessionOnRunEnd: params.opts.cleanupCliLiveSessionOnRunEnd,
       });
     return resolveReusableCliSessionBinding().then(async (activeCliSessionBinding) => {
       try {
@@ -425,11 +455,11 @@ export async function runAgentAttempt(params: {
 
           params.sessionEntry =
             (await clearCliSessionInStore({
-            provider: cliExecutionProvider,
-            sessionKey: params.sessionKey,
-            sessionStore: params.sessionStore,
-            storePath: params.storePath,
-          })) ?? params.sessionEntry;
+              provider: cliExecutionProvider,
+              sessionKey: params.sessionKey,
+              sessionStore: params.sessionStore,
+              storePath: params.storePath,
+            })) ?? params.sessionEntry;
 
           return await runCliWithSession(undefined).then(async (result) => {
             if (
