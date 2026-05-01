@@ -1,0 +1,78 @@
+{
+  "id": "skill-morning-digest",
+  "name": "Morning Digest — daily one-screen summary",
+  "description": "Computes the previous 24h of docket activity (shipped / blockers / decisions / awaiting-Joseph) anchored to yesterday 08:05 local. Emits markdown / banner / JSON; posts to Telegram via @openclaw/skill-reach-cascade when run with default format. Triggered by LaunchAgent at 08:05 CDT today; eventual home is openclaw cron. Salvages chuck-morning-digest.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-morning-digest",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["morning_digest"]
+  },
+  "uiHints": {
+    "telegramChatId": {
+      "label": "Telegram chat id",
+      "help": "Numeric chat id Joseph receives the daily digest on."
+    },
+    "anchorHour": {
+      "label": "Anchor hour (0-23)",
+      "help": "Hour-of-day at which the digest window starts (default 8 = 08:05 if anchorMinute=5)."
+    },
+    "windowChannelMaxItems": {
+      "label": "Max items per section",
+      "help": "Hard cap per section (shipped / blockers / decisions / awaiting). Default 8."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "telegramChatId": {
+        "type": "string",
+        "default": "8630163522"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "digestDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/morning-digest"
+      },
+      "anchorHour": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 23,
+        "default": 8
+      },
+      "anchorMinute": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 59,
+        "default": 5
+      },
+      "windowSectionMaxItems": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 8
+      },
+      "bannerMaxChars": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 500,
+        "default": 180
+      }
+    }
+  }
+}

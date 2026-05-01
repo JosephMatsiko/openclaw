@@ -1,4 +1,25 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 5b of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/skill-morning-digest/src/run.ts (re-exported via
+//   @openclaw/skill-morning-digest api.ts)
+//
+// This .mjs preserves identical compute + Telegram delivery semantics so
+// the LaunchAgent at ~/Library/LaunchAgents/com.openclaw.chuck-morning-digest.plist
+// keeps firing at 08:05 CDT unchanged. Vanilla Node can't import the TS
+// plugin's api.ts at runtime, so duplicating the logic is the working seam.
+// Both copies write to the same receipt format under
+// ~/.openclaw/workspace/state/chuck-v3/morning-digest/digest-<yyyymmdd>.json
+// — same-day reruns overwrite cleanly.
+//
+// EDITS: bug fixes go in BOTH places (here AND
+// extensions/skill-morning-digest/src/*.ts) until this shim retires.
+// The .mjs retires when the LaunchAgent migrates to openclaw-managed cron
+// (queued; awaits openclaw timezone-aware StartCalendarInterval support).
+// =============================================================================
+//
 // chuck-morning-digest - one-screen daily summary at 08:05 CDT.
 //
 // Computes (over the last 24h, anchored to yesterday 08:05 local):
