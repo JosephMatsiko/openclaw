@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-panel-ask",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw skill: parallel broadcast across multiple AI voices, with cross-family synthesis.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "id": "skill-panel-ask",
+  "name": "Skill — Panel Ask",
+  "description": "Broadcast a single intent across multiple AI voices in parallel and synthesize the replies with cross-family discipline. Wraps the parallel-fleet-broadcast pattern as a first-class OpenClaw tool so any agent can summon the External Council programmatically.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-panel-ask",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["panel_ask"]
+  },
+  "uiHints": {
+    "defaultMode": {
+      "label": "Default Mode",
+      "help": "raw collects per-voice replies. synthesize folds them via Opus 4.7 with cross-family discipline."
+    },
+    "defaultVoices": {
+      "label": "Default Voices",
+      "help": "Voice IDs invoked when the caller does not specify a subset. Empty array = all healthy voices in the registry."
+    },
+    "perVoiceTimeoutMs": {
+      "label": "Per-voice Timeout (ms)",
+      "help": "Hard ceiling for a single voice's reply. Slow voices that exceed this do not block faster ones; the panel still completes with a partial set."
+    },
+    "outputDir": {
+      "label": "Output Directory",
+      "help": "Where to write per-voice reply artifacts. Each voice gets a file named <Label>-<Voice>-<Date>.md."
+    },
+    "scriptPath": {
+      "label": "Dispatch Script",
+      "help": "Absolute path to the apex-panel-ask.mjs dispatch script. Defaults to the bundled extensions/memory-graph/scripts/apex-panel-ask.mjs."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "defaultMode": {
+        "type": "string",
+        "enum": ["raw", "synthesize"],
+        "default": "synthesize"
+      },
+      "defaultVoices": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": []
+      },
+      "perVoiceTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 1800000,
+        "default": 300000
+      },
+      "outputDir": {
+        "type": "string",
+        "default": "~/Documents"
+      },
+      "scriptPath": {
+        "type": "string",
+        "default": ""
+      }
+    }
+  }
+}
