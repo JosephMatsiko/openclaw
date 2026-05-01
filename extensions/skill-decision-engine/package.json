@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/skill-decision-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomy primitive: detect → decide → propose. Six pattern detectors over docket + events + MCP registries, risk-classed structured proposals, auto-apply for low-risk docket promotions.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*",
+    "@openclaw/skill-reach-cascade": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "id": "skill-decision-engine",
+  "name": "Decision Engine — detect, decide, propose",
+  "description": "Autonomy primitive: scans Chuck's actual operating state via 6 detectors (failed-task-cluster, zombie-cluster, channel-drift, scanner-tune, orphan-mcp, stale-mac-heal), generates structured proposals (situation + options + recommendation + rationale + risk class + rollback), auto-applies low-risk docket promotions, and stages med/high proposals for Joseph via @openclaw/skill-reach-cascade. Idempotency through fingerprint dedupe (12h window). Anti-flood cap of 3 proposals per scan. Salvages chuck-decision-engine.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-decision-engine",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["decision_engine"]
+  },
+  "uiHints": {
+    "telegramChatId": {
+      "label": "Telegram chat id",
+      "help": "Numeric chat id Joseph receives proposal notifications on."
+    },
+    "maxProposalsPerScan": {
+      "label": "Anti-flood cap per scan",
+      "help": "Hard cap on proposals emitted per scan run. Surplus hits are skipped + counted in the scan summary."
+    },
+    "fingerprintDedupHours": {
+      "label": "Fingerprint dedup window (hours)",
+      "help": "Skip a hit when a proposal with the same pattern-fingerprint was emitted in the last N hours."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "telegramChatId": {
+        "type": "string",
+        "default": "8630163522"
+      },
+      "scriptsDir": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "decisionsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/decisions"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "macHealLatestPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal/latest.json"
+      },
+      "openclawConfigPath": {
+        "type": "string",
+        "default": "~/.openclaw/openclaw.json"
+      },
+      "codexConfigPath": {
+        "type": "string",
+        "default": "~/.codex/config.toml"
+      },
+      "claudeConfigPath": {
+        "type": "string",
+        "default": "~/.claude.json"
+      },
+      "maxProposalsPerScan": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 3
+      },
+      "fingerprintDedupHours": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 168,
+        "default": 12
+      }
+    }
+  }
+}

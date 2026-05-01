@@ -1,4 +1,24 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 5c of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/skill-decision-engine/src/scan.ts (re-exported via
+//   @openclaw/skill-decision-engine api.ts)
+//
+// This .mjs preserves identical detect → decide → propose semantics so the
+// LaunchAgent at ~/Library/LaunchAgents/com.openclaw.chuck-decision-engine.plist
+// keeps firing every 30 min unchanged. Vanilla Node can't import the TS
+// plugin's api.ts at runtime, so duplicating the logic is the working seam.
+// Both copies write to ~/.openclaw/workspace/state/chuck-v3/decisions/.
+//
+// EDITS: bug fixes go in BOTH places (here AND
+// extensions/skill-decision-engine/src/*.ts) until this shim retires.
+// The .mjs retires when the LaunchAgent migrates to openclaw-managed cron
+// (queued alongside chuck-morning-digest, chuck-cascade-watcher,
+// chuck-introspect — the watchers/cron migration unit).
+// =============================================================================
+//
 // chuck-decision-engine — autonomy primitive: detect → decide → propose.
 //
 // Where chuck-self-improvement-scanner is gap-detect (just identifies missing
