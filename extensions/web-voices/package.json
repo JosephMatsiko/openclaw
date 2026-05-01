@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/plugin-web-voices",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Subscription-driven web voices as first-class OpenClaw provider plugin: chatgpt-web, gemini-web, grok-web, perplexity-web, claude-ai-web, aistudio-web, comet-web, notebooklm-web.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

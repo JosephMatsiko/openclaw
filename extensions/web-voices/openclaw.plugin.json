@@ -1,0 +1,62 @@
+{
+  "id": "web-voices",
+  "name": "Web Voices — subscription-driven Chrome voices",
+  "description": "First-class provider plugin for subscription-driven web voices: chatgpt-web, gemini-web, grok-web, perplexity-web, claude-ai-web, aistudio-web, comet-web, notebooklm-web. Wraps DOM-fragile UI-intercept logic behind a versioned, contract-bound surface so vendor CSS-class changes can be patched in one place instead of breaking every user's bespoke scripts.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/web-voices",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["web_voice"]
+  },
+  "uiHints": {
+    "workstationLeaseFile": {
+      "label": "Workstation lease file",
+      "help": "Single-writer lease so parallel voice calls don't clobber each other's Chrome session."
+    },
+    "selectorRegistryPath": {
+      "label": "Selector registry path",
+      "help": "JSON file with per-voice + per-version DOM selectors. Auto-patch on selector miss."
+    },
+    "perVoiceTimeoutMs": {
+      "label": "Per-voice timeout",
+      "help": "Hard ceiling for a single web-voice call (DOM ready + reply received + content captured)."
+    },
+    "defaultProfilePort": {
+      "label": "Default Chrome profile port",
+      "help": "CDP port of the primary Chrome profile (typically 9222)."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "workstationLeaseFile": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v2/surface-control/active-workstation-lease.json"
+      },
+      "selectorRegistryPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/web-voices/selectors.json"
+      },
+      "perVoiceTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 1800000,
+        "default": 300000
+      },
+      "defaultProfilePort": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 65535,
+        "default": 9222
+      }
+    }
+  }
+}
