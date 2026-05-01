@@ -39,6 +39,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { formatLongUpdate } from "./chuck-format-update.mjs";
 import {
   rankChannels as rankReachChannels,
   recordFailure as recordReachFailure,
@@ -376,8 +377,89 @@ function buildSignedText(payload) {
   return `${head}\n\n— Chuck — for Joseph — ${ymd}`;
 }
 
+// Raw Bot API send with parse_mode=HTML — used for long-form formatted
+// updates. Records to the reach-ledger via the same channel name as the
+// plain-text path so per-channel last_proven_at stays consistent.
+async function sendTelegramHtmlRaw(htmlText) {
+  const start = Date.now();
+  const cfg = readJson(OPENCLAW_CONFIG, {});
+  const token = cfg?.channels?.telegram?.botToken;
+  if (!token) {
+    return { ok: false, durationMs: 0, error: "no telegram botToken in openclaw.json" };
+  }
+  return await new Promise((resolve) => {
+    const res = spawnSync(
+      "/usr/bin/curl",
+      [
+        "-sS",
+        "--max-time",
+        "10",
+        "-X",
+        "POST",
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        "--data-urlencode",
+        `chat_id=${TELEGRAM_CHAT_ID}`,
+        "--data-urlencode",
+        "parse_mode=HTML",
+        "--data-urlencode",
+        `text=${htmlText}`,
+      ],
+      { timeout: TIMEOUT_TELEGRAM_MS, encoding: "utf8" },
+    );
+    const durationMs = Date.now() - start;
+    if (res.error) {
+      resolve({ ok: false, durationMs, error: res.error.message });
+      return;
+    }
+    if (res.status !== 0) {
+      resolve({
+        ok: false,
+        durationMs,
+        error: (res.stderr || "").trim() || `curl exit ${res.status}`,
+      });
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(res.stdout);
+    } catch {
+      resolve({ ok: false, durationMs, error: `non-JSON response: ${res.stdout.slice(0, 120)}` });
+      return;
+    }
+    if (parsed?.ok) {
+      resolve({
+        ok: true,
+        durationMs,
+        messageId: String(parsed?.result?.message_id ?? ""),
+        transport: "raw-bot-api-html",
+      });
+      return;
+    }
+    resolve({
+      ok: false,
+      durationMs,
+      error: parsed?.description || "telegram api returned not-ok (HTML mode)",
+    });
+  });
+}
+
 async function attemptTelegram(payload) {
   const text = buildSignedText(payload);
+  // Auto-format long updates: split into sections, wrap titled sections in
+  // <blockquote expandable>, escape HTML in user content. Returns
+  // {parseMode, text, formatted}. parseMode is null for short content
+  // (passthrough plain text).
+  const formatted = formatLongUpdate(text);
+
+  // Long-form HTML goes through raw Bot API directly because the openclaw
+  // native message send doesn't expose parse_mode through the public CLI
+  // flag set today (the underlying telegram channel SUPPORTS parse_mode —
+  // see extensions/telegram/src/draft-stream.test.ts:281 — but the seam
+  // is via presentation.renderText, not a plain CLI flag). Once that
+  // surface lands publicly, this path collapses back into sendViaOpenclaw.
+  if (formatted.parseMode === "HTML") {
+    return await sendTelegramHtmlRaw(formatted.text);
+  }
 
   // Preferred path: openclaw message send. Falls back to raw Bot API curl
   // if the gateway is unreachable so cascade delivery remains resilient.

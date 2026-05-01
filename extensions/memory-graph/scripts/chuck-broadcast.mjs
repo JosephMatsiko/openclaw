@@ -40,6 +40,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { formatLongUpdate } from "./chuck-format-update.mjs";
 
 const HOME = homedir();
 const WORKSPACE_STATE = join(HOME, ".openclaw", "workspace", "state");
@@ -257,11 +258,70 @@ async function tryAppleBridge(payload) {
   return { ok: true, durationMs };
 }
 
+async function sendTelegramHtmlRaw(htmlText, cfg) {
+  const start = Date.now();
+  const token = cfg?.channels?.telegram?.botToken;
+  if (!token) return { ok: false, durationMs: 0, error: "no telegram botToken" };
+  const res = spawnSync(
+    "/usr/bin/curl",
+    [
+      "-sS",
+      "--max-time",
+      String(Math.floor(PER_CHANNEL_TIMEOUT_MS / 1000)),
+      "-X",
+      "POST",
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      "--data-urlencode",
+      `chat_id=${TELEGRAM_CHAT_ID}`,
+      "--data-urlencode",
+      "parse_mode=HTML",
+      "--data-urlencode",
+      `text=${htmlText}`,
+    ],
+    { timeout: PER_CHANNEL_TIMEOUT_MS, encoding: "utf8" },
+  );
+  const durationMs = Date.now() - start;
+  if (res.status !== 0) {
+    return {
+      ok: false,
+      durationMs,
+      error: (res.stderr || "").trim() || `curl exit ${res.status}`,
+    };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(res.stdout);
+  } catch {
+    return { ok: false, durationMs, error: `non-JSON response: ${res.stdout.slice(0, 120)}` };
+  }
+  if (parsed?.ok) {
+    return {
+      ok: true,
+      durationMs,
+      detail: { messageId: parsed?.result?.message_id, transport: "raw-bot-api-html" },
+    };
+  }
+  return {
+    ok: false,
+    durationMs,
+    error: parsed?.description || "telegram api returned not-ok (HTML mode)",
+  };
+}
+
 async function tryTelegram(payload) {
   const cfg = readJson(OPENCLAW_CONFIG, {});
   if (!cfg?.channels?.telegram?.enabled)
     return { ok: false, durationMs: 0, error: "telegram disabled in openclaw.json" };
   const text = buildSignedText(payload);
+
+  // Long-form HTML auto-format: when the signed body crosses the threshold,
+  // wrap titled sections in <blockquote expandable> via formatLongUpdate
+  // and send through raw Bot API with parse_mode=HTML. Short content stays
+  // on the openclaw native plain-text path.
+  const formatted = formatLongUpdate(text);
+  if (formatted.parseMode === "HTML") {
+    return await sendTelegramHtmlRaw(formatted.text, cfg);
+  }
 
   // Preferred path: openclaw message send (uses configured channel binding,
   // gateway-routed, observable in openclaw event ledger). Falls back to raw
