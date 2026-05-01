@@ -34,3 +34,4 @@ export {
 } from "./src/invariants.js";
 export { posteriorDeltaId, priorCapsuleId, sha256, shortId, stableStringify } from "./src/hash.js";
 export { type PriorDeltaConfig, resolveConfig } from "./src/config.js";
+export { openStore, type OpenStoreOptions, type PriorDeltaStore } from "./src/store.js";

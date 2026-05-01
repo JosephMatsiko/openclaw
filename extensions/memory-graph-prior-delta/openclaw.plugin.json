@@ -2,7 +2,7 @@
   "id": "memory-graph-prior-delta",
   "name": "Memory Graph — Universal Prior + Posterior Delta",
   "description": "Typed dissent-preserving prior contract for multi-agent OpenClaw. Adds prior-capsule, posterior-delta, compaction-record, and dissent-record node types to the memory-graph SQLite store with append-only + dissent-preservation invariants enforced as schema validators.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/memory-graph-prior-delta",
   "activation": {

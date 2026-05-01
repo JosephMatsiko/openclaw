@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/plugin-memory-graph-prior-delta",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Typed dissent-preserving prior contract on top of the memory-graph plugin.",
   "type": "module",

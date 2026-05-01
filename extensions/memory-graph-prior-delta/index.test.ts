@@ -5,6 +5,9 @@
 // runtime — so this suite can run in milliseconds and is the primary
 // proof of correctness for v0.1.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { resolveConfig } from "./src/config.js";
 import { posteriorDeltaId, priorCapsuleId, sha256, stableStringify } from "./src/hash.js";
@@ -18,7 +21,8 @@ import {
   validateCrossFamilyDiscipline,
   validateThreeSignatures,
 } from "./src/invariants.js";
-import type { CompactionRecord, PosteriorDelta } from "./src/types.js";
+import { openStore } from "./src/store.js";
+import type { CompactionRecord, PosteriorDelta, PriorCapsule } from "./src/types.js";
 
 function fakeDelta(overrides: Partial<PosteriorDelta> = {}): PosteriorDelta {
   return {
@@ -356,5 +360,211 @@ describe("config resolver", () => {
   test("clamps invalid types", () => {
     const c = resolveConfig({ freshnessWindowMinutes: "no" } as unknown as Record<string, unknown>);
     expect(c.freshnessWindowMinutes).toBe(240);
+  });
+});
+
+describe("v0.2 SQLite store", () => {
+  function tmpDb(): string {
+    const dir = mkdtempSync(join(tmpdir(), "prior-delta-store-"));
+    return join(dir, "graph.sqlite");
+  }
+
+  function buildPrior(overrides: Partial<PriorCapsule> = {}): PriorCapsule {
+    const generated_at = "2026-05-01T00:00:00.000Z";
+    const content = {
+      summary: "genesis",
+      claim_refs: [],
+      dissent_refs: [],
+      evidence_index: {},
+    };
+    const id = priorCapsuleId({ parent_hash: null, content, generated_at });
+    return {
+      type: "prior-capsule",
+      id,
+      parent_hash: null,
+      content,
+      generated_at,
+      generated_by: "test",
+      read_markers: {},
+      ...overrides,
+    };
+  }
+
+  function buildDelta(overrides: Partial<PosteriorDelta> = {}): PosteriorDelta {
+    const prior_hash = overrides.prior_hash ?? "prior-fake";
+    const voice_id = overrides.voice_id ?? "claude-cli";
+    const generated_at = overrides.generated_at ?? "2026-05-01T00:01:00.000Z";
+    const claims = overrides.claims ?? [
+      { id: "c1", statement: "x", confidence: 0.9, evidence_refs: [] },
+    ];
+    const dissent = overrides.dissent ?? [];
+    const proposed_mutations = overrides.proposed_mutations ?? [];
+    const id = posteriorDeltaId({
+      prior_hash,
+      voice_id,
+      content: { claims, dissent, proposed_mutations },
+      generated_at,
+    });
+    return {
+      type: "posterior-delta",
+      id,
+      prior_hash,
+      voice_id,
+      family: overrides.family ?? "anthropic",
+      surface: overrides.surface ?? "cli",
+      generated_at,
+      claims,
+      dissent,
+      proposed_mutations,
+      self_doubt_note: overrides.self_doubt_note ?? null,
+    };
+  }
+
+  test("schema creates fresh; stats reports zeros", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const stats = store.stats();
+    expect(stats).toEqual({
+      priorCapsules: 0,
+      posteriorDeltas: 0,
+      compactionRecords: 0,
+      dissentRecords: 0,
+    });
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("write + read prior-capsule round-trip", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const prior = buildPrior();
+    store.writePriorCapsule(prior);
+    const back = store.getPriorByHash(prior.id);
+    expect(back?.id).toBe(prior.id);
+    expect(back?.content.summary).toBe("genesis");
+    expect(store.stats().priorCapsules).toBe(1);
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("getCurrentPrior returns the prior with no descendant", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const genesis = buildPrior();
+    store.writePriorCapsule(genesis);
+    const second = buildPrior({
+      generated_at: "2026-05-01T00:05:00.000Z",
+      content: { summary: "second", claim_refs: [], dissent_refs: [], evidence_index: {} },
+      parent_hash: genesis.id,
+    });
+    // Recompute id since content changed
+    const secondId = priorCapsuleId({
+      parent_hash: genesis.id,
+      content: second.content,
+      generated_at: second.generated_at,
+    });
+    store.writePriorCapsule({ ...second, id: secondId });
+    const current = store.getCurrentPrior();
+    expect(current?.id).toBe(secondId);
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("posterior-delta write rejects mismatched id (content-address invariant)", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const delta = buildDelta();
+    const tampered = { ...delta, id: "delta-fake-tampered" };
+    expect(() => store.writePosteriorDelta(tampered)).toThrow(/id mismatch/);
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("listDeltasForPrior returns all deltas in generated_at order", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const d1 = buildDelta({ voice_id: "claude-cli", generated_at: "2026-05-01T00:01:00.000Z" });
+    const d2 = buildDelta({
+      voice_id: "gemini-cli",
+      family: "google",
+      generated_at: "2026-05-01T00:02:00.000Z",
+    });
+    store.writePosteriorDelta(d1);
+    store.writePosteriorDelta(d2);
+    const deltas = store.listDeltasForPrior("prior-fake");
+    expect(deltas.map((d) => d.voice_id)).toEqual(["claude-cli", "gemini-cli"]);
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("recordRead updates read-markers for the prior", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const prior = buildPrior();
+    store.writePriorCapsule(prior);
+    store.recordRead(prior.id, {
+      voice_id: "claude-cli",
+      read_at: "2026-05-01T00:10:00.000Z",
+      delta_id: "delta-x",
+    });
+    const back = store.getPriorByHash(prior.id);
+    expect(back?.read_markers["claude-cli"]?.delta_id).toBe("delta-x");
+    store.close();
+    rmSync(path, { force: true });
+  });
+
+  test("compaction-record write enforces all four invariants", () => {
+    const path = tmpDb();
+    const store = openStore({ dbPath: path });
+    const ctx: CrossFamilyContext = {
+      voiceFamilies: {
+        "claude-cli": "anthropic",
+        compiler: "google",
+        court: "openai",
+        notary: "xai",
+      },
+    };
+    const delta = buildDelta({
+      voice_id: "claude-cli",
+      family: "anthropic",
+      dissent: [
+        {
+          id: "dissent-z",
+          against_claim_id: "c1",
+          rationale: "...",
+          counter_evidence_refs: [],
+        },
+      ],
+    });
+    // Bad: drops dissent.
+    const badRecord: CompactionRecord = {
+      type: "compaction-record",
+      id: "comp-bad",
+      prior_hash_before: "prior-1",
+      prior_hash_after: "prior-2",
+      proposer: "compiler",
+      approver: "court",
+      signer: "notary",
+      proposed_at: "2026-05-01T00:00:00Z",
+      approved_at: "2026-05-01T00:01:00Z",
+      signed_at: "2026-05-01T00:02:00Z",
+      removed_delta_ids: [delta.id],
+      preserved_dissent_ids: [],
+      proof_of_equivalence: { method: "schema-check", artifact_hash: "0".repeat(64) },
+      rollback_pointer: "rollback-1",
+    };
+    expect(() => store.writeCompactionRecord(badRecord, [delta], ctx)).toThrow(SchemaViolation);
+    expect(store.stats().compactionRecords).toBe(0);
+
+    // Good: preserves dissent + cross-family approver.
+    const goodRecord: CompactionRecord = {
+      ...badRecord,
+      id: "comp-good",
+      preserved_dissent_ids: ["dissent-z"],
+    };
+    store.writeCompactionRecord(goodRecord, [delta], ctx);
+    expect(store.stats().compactionRecords).toBe(1);
+    store.close();
+    rmSync(path, { force: true });
   });
 });
