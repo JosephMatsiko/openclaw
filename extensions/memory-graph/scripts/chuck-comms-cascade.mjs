@@ -39,6 +39,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  rankChannels as rankReachChannels,
+  recordFailure as recordReachFailure,
+  recordSuccess as recordReachSuccess,
+} from "./chuck-reach-ledger.mjs";
+import { send as sendViaSmsBridge } from "./chuck-sms-bridge.mjs";
 import { listSubscriptions as listWebPushSubscriptions, sendWebPush } from "./chuck-web-push.mjs";
 
 const HOME = homedir();
@@ -73,16 +79,28 @@ const DEFAULT_CASCADE = {
   // PWA-installed device (iPad/iPhone Safari + macOS Chrome PWA) without
   // routing through Telegram. Falls through to apex-apple-bridge when no
   // subscriptions are registered (empty PWA install state).
+  // 2026-05-01: sms-bridge added as the last live channel before voice/digest
+  // (panel #1 failure-mode mitigation). Uses Apple Continuity SMS via
+  // Messages.app — when iMessage routing fails, Apple falls back to SMS over
+  // the iPhone's LTE link, a separate carrier from the Mac's Wi-Fi.
   immediate: [
     "web-push",
     "apex-apple-bridge",
     "telegram",
     "discord",
     "imessage",
+    "sms-bridge",
     "voice",
     "digest",
   ],
-  "immediate-low-friction": ["web-push", "apex-apple-bridge", "telegram", "discord", "digest"],
+  "immediate-low-friction": [
+    "web-push",
+    "apex-apple-bridge",
+    "telegram",
+    "discord",
+    "sms-bridge",
+    "digest",
+  ],
   digest: ["digest"],
 };
 
@@ -565,6 +583,27 @@ async function attemptDiscord(payload) {
   }
 }
 
+function attemptSmsBridge(payload) {
+  // Routes via Messages.app to Joseph's iPhone. Apple's Continuity decides
+  // whether the recipient gets iMessage (Apple-to-Apple) or SMS over LTE.
+  // When the Mac's Wi-Fi is degraded but the iPhone's cellular link is up,
+  // SMS-over-LTE is the working path — separate carrier from openclaw's
+  // gateway, by design.
+  const text = buildSignedText(payload);
+  // Defer ledger writes to chuck-comms-cascade's own success/failure path
+  // below (we record under the canonical "sms-bridge" channel name there
+  // too) — passing recordToLedger:false avoids double-counting.
+  const result = sendViaSmsBridge({ buddy: IMESSAGE_BUDDY, text, recordToLedger: false });
+  if (result.ok) {
+    return { ok: true, durationMs: result.durationMs, transport: result.transport };
+  }
+  return {
+    ok: false,
+    durationMs: result.durationMs,
+    error: result.error || "sms-bridge failed",
+  };
+}
+
 function attemptVoice(payload) {
   const start = Date.now();
   // Tight spoken text: subject only, plus first sentence of body iff critical.
@@ -615,6 +654,7 @@ const ATTEMPTERS = {
   telegram: attemptTelegram,
   discord: attemptDiscord,
   imessage: attemptIMessage,
+  "sms-bridge": attemptSmsBridge,
   voice: attemptVoice,
   digest: attemptDigest,
 };
@@ -769,6 +809,26 @@ export async function notify(payloadIn) {
       error: attempt.error || null,
       durationMs: attempt.durationMs,
     });
+    // Reach-ledger writes: every cascade attempt updates last_proven_at /
+    // last_failed_at per channel so future cascades can rank by freshness.
+    // Skip recording for the synthetic "digest" channel (always succeeds
+    // locally and is a safety-net, not a reach signal) and for skipped
+    // entries (--no-apple-bridge, etc).
+    if (!skipReason && channel !== "digest" && !result.dryRun) {
+      try {
+        if (result.ok) {
+          recordReachSuccess(channel, {
+            messageId: result.messageId ?? null,
+            transport: result.transport ?? null,
+          });
+        } else {
+          recordReachFailure(channel, attempt.error || "unknown");
+        }
+      } catch (err) {
+        // Ledger write failures must never break the cascade.
+        process.stderr.write(`[reach-ledger] write failed: ${String(err)}\n`);
+      }
+    }
     if (result.ok) {
       // Digest always succeeds locally; we still want it as the cascade
       // terminus, so a successful digest counts as "delivered to digest" only
