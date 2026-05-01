@@ -82,6 +82,97 @@ const APEX_PANEL_ASK_PATH = join(
 // open in the meantime.
 const ASK_PER_VOICE_TIMEOUT_MS = 180_000;
 
+// IDENTITY.md path — Chuck's full persona doctrine, read fresh on every
+// request so Joseph's edits take effect immediately without restart.
+const IDENTITY_PATH = join(HOME, ".openclaw", "workspace", "IDENTITY.md");
+// Memory graph SQLite — same store memory-graph plugin uses. We read recent
+// nodes for context injection.
+const MEMORY_GRAPH_DB = join(HOME, ".openclaw", "memory", "graph.sqlite");
+
+/**
+ * Build a rich Chuck system prompt for the /ask request:
+ *   1. Chuck operating frame (this surface, this voice)
+ *   2. Full IDENTITY.md content (the doctrine)
+ *   3. Recent memory-graph context (last 8 nodes by ts) — gives the voice
+ *      a glimpse of Joseph''s recent activity/intent so Chuck reads as
+ *      continuous rather than amnesiac
+ *
+ * This is the substantive-costume version. Real continuity (every turn
+ * landing as a typed posterior-delta + reading the current prior + access
+ * to MCP tools) waits on the openclaw agent CLI path, which currently
+ * blocks on gateway WS RPC warmup (issue #75791).
+ */
+async function buildChuckPreamble() {
+  const parts = [];
+  parts.push(
+    "You are CHUCK — Joseph's named agent (Joseph named you 2026-04-21). One Chuck across every surface he reaches you on. The user message below arrives through Joseph's Chuck PWA chat (iPad / iPhone / Mac, all served via Tailscale from his Mac).",
+  );
+  parts.push("");
+  parts.push(
+    "Voice: editor, not coach. Confident, tight, American English. First-name basis with Joseph. No hedging, no hype, no cheerleading. First-person 'I' is fine when it reads as conversation. Be brief and useful — this is a chat surface, not a report.",
+  );
+  parts.push("");
+  parts.push(
+    "If asked who you are, answer as Chuck — not as the underlying CLI/web tool's default agent persona. Your operator is Joseph Matsiko. You live inside the Sovereign Apex architecture (Gateway, Vanguard, Fortress, subscriptions-only, ring-weighted). The model under you is interchangeable; the identity above it is not.",
+  );
+
+  // 1. IDENTITY.md content — the doctrine.
+  try {
+    if (existsSync(IDENTITY_PATH)) {
+      const identity = readFileSync(IDENTITY_PATH, "utf8");
+      parts.push("");
+      parts.push("--- IDENTITY.md (your operating doctrine) ---");
+      parts.push(identity);
+      parts.push("--- end IDENTITY.md ---");
+    }
+  } catch {
+    /* IDENTITY.md missing or unreadable — fall through with the operating frame only. */
+  }
+
+  // 2. Recent memory-graph context — the last 8 nodes by timestamp, so
+  //    Chuck sees what Joseph has been working on. Read directly via
+  //    node:sqlite (DatabaseSync) — same engine memory-graph itself uses.
+  //    Lazy dynamic import avoids the experimental warning at boot time.
+  try {
+    if (existsSync(MEMORY_GRAPH_DB)) {
+      const sqliteMod = await import("node:sqlite");
+      const db = new sqliteMod.DatabaseSync(MEMORY_GRAPH_DB, { readOnly: true });
+      try {
+        let rows;
+        try {
+          rows = db
+            .prepare(
+              "SELECT type, content FROM nodes ORDER BY COALESCE(ts, created_at) DESC LIMIT 8",
+            )
+            .all();
+        } catch {
+          rows = [];
+        }
+        if (Array.isArray(rows) && rows.length > 0) {
+          parts.push("");
+          parts.push("--- recent memory-graph nodes (your last 8 stored items) ---");
+          for (const row of rows) {
+            const r = row;
+            const content =
+              typeof r.content === "string" ? r.content.slice(0, 280) : String(r.content);
+            parts.push(`[${r.type}] ${content}`);
+          }
+          parts.push("--- end memory-graph context ---");
+        }
+      } finally {
+        db.close();
+      }
+    }
+  } catch {
+    /* memory-graph unreadable — that's fine, doctrine alone is still substantial. */
+  }
+
+  parts.push("");
+  parts.push("--- USER MESSAGE FOLLOWS ---");
+  parts.push("");
+  return parts.join("\n");
+}
+
 // Allowed origins for CORS. PWA is served from this host so default same-origin
 // (no CORS headers needed) is fine, but we set Access-Control-Allow-Origin
 // liberally for the API namespace so a browser-installed PWA whose
@@ -593,13 +684,20 @@ async function handleAsk(req, res) {
   if (!existsSync(APEX_PANEL_ASK_PATH)) {
     return sendJson(res, 500, { error: `dispatch script not found at ${APEX_PANEL_ASK_PATH}` });
   }
+  // Build the rich Chuck preamble per-request: full IDENTITY.md + recent
+  // memory-graph nodes + operating frame. So every voice answers AS CHUCK
+  // rather than as its underlying tool's default agent, and with awareness
+  // of what Joseph has been working on. The builder reads IDENTITY.md and
+  // the memory-graph SQLite directly — no gateway dependency.
+  const preamble = await buildChuckPreamble();
+  const personaPrompt = preamble + prompt;
   const start = Date.now();
   const args = [
     APEX_PANEL_ASK_PATH,
     "--only",
     voice,
     "--prompt",
-    prompt,
+    personaPrompt,
     "--label",
     label,
     "--suffix",
