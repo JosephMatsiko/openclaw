@@ -1,4 +1,23 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 2 of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/imessage-osascript/  (@openclaw/plugin-imessage-osascript)
+//
+// This .mjs preserves identical osascript send + reach-ledger writes so the
+// remaining caller (chuck-comms-cascade.mjs) keeps working unchanged during
+// the transition. The .mjs cannot import the TS plugin's api.ts at
+// vanilla-Node runtime (no .ts loader), so duplicating the logic is the
+// working seam.
+//
+// This file retires when chuck-comms-cascade migrates into openclaw skills
+// in Unit 4 (queued).
+//
+// EDITS: bug fixes go in BOTH places (here AND extensions/imessage-osascript/src/send.ts)
+// until this shim retires.
+// =============================================================================
+//
 // chuck-sms-bridge — SMS-via-Mac-Messages.app fallback for reach-Joseph cascade.
 //
 // Why this exists:

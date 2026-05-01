@@ -1,4 +1,25 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 2 of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/reach-ledger/  (@openclaw/plugin-reach-ledger)
+//
+// This .mjs preserves identical wire-format reads/writes (same
+// ~/.openclaw/workspace/state/chuck-v3/reach-ledger.json) so the remaining
+// caller (chuck-comms-cascade.mjs) keeps working unchanged during the
+// transition. The .mjs cannot import the TS plugin's api.ts at vanilla-Node
+// runtime (no .ts loader), so duplicating the logic is the working seam.
+//
+// This file retires when chuck-comms-cascade migrates into openclaw skills
+// in Unit 4 (queued). Joseph's policy 2026-05-01: every commit moves
+// chuck-* mass INTO openclaw or RETIRES it. Both copies write to the same
+// ledger file — wire-compatible.
+//
+// EDITS: bug fixes go in BOTH places (here AND extensions/reach-ledger/src/store.ts)
+// until this shim retires.
+// =============================================================================
+//
 // chuck-reach-ledger — per-channel `last_proven_at` ledger.
 //
 // This is the panel's #1 failure-mode mitigation: every cascade attempt

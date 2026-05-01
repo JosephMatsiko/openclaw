@@ -1,0 +1,54 @@
+{
+  "id": "reach-ledger",
+  "name": "Reach Ledger — per-channel last_proven_at",
+  "description": "Tracks per-channel reach state (last_proven_at, last_failed_at, consecutive failures/successes) so cascade dispatchers can rank channels by freshness and circuit-break broken paths. The substrate that lets a multi-channel reach-cascade learn which path wins from one degradation event to the next. Salvages chuck-reach-ledger.mjs into a proper openclaw plugin with tool + programmatic API.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/reach-ledger",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["reach_ledger"]
+  },
+  "uiHints": {
+    "ledgerPath": {
+      "label": "Ledger file path",
+      "help": "Atomic-write JSON ledger location. Default preserves the chuck-v3 path so existing reach-ledger.json data survives the migration."
+    },
+    "freshnessWindowMinutes": {
+      "label": "Freshness window (minutes)",
+      "help": "Channels with last_proven_at within this window are promoted to the front of the cascade ranking."
+    },
+    "circuitBreakerThreshold": {
+      "label": "Circuit-breaker failure count",
+      "help": "After this many consecutive failures, a channel is pushed to the end of the cascade ranking (still tried, but only after all others)."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "ledgerPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/reach-ledger.json"
+      },
+      "freshnessWindowMinutes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10080,
+        "default": 15
+      },
+      "circuitBreakerThreshold": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 5
+      }
+    }
+  }
+}

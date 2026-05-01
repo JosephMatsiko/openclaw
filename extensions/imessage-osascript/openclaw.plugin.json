@@ -1,0 +1,52 @@
+{
+  "id": "imessage-osascript",
+  "name": "iMessage osascript — Continuity SMS fallback",
+  "description": "Send-only iMessage path via Apple Messages.app + osascript. Bypasses openclaw's broken imessage channel (issue #75792, observed earlier on Joseph's 94 MB chat.db). Apple Continuity SMS routes via the iPhone's LTE link when iMessage is offline — the deepest-reach fallback in the cascade. v0.1 ships as a tool plugin (sms_bridge) with programmatic API; v0.2 may upgrade to a full channel plugin.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/imessage-osascript",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["sms_bridge"]
+  },
+  "uiHints": {
+    "defaultBuddy": {
+      "label": "Default recipient (E.164 or Apple ID)",
+      "help": "Used when the tool is invoked without an explicit `buddy` argument."
+    },
+    "timeoutMs": {
+      "label": "Send timeout (ms)",
+      "help": "Hard SIGKILL on the osascript subprocess if Messages.app hangs."
+    },
+    "recordToLedger": {
+      "label": "Record sends to reach-ledger",
+      "help": "When true, every send writes an entry to @openclaw/plugin-reach-ledger under channel name 'sms-bridge'."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "defaultBuddy": {
+        "type": "string",
+        "default": ""
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 60000,
+        "default": 12000
+      },
+      "recordToLedger": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  }
+}
