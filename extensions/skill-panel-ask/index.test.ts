@@ -10,6 +10,7 @@ import { describe, expect, test } from "vitest";
 import { resolveConfig } from "./src/config.js";
 import { runPanelAsk } from "./src/dispatch.js";
 import { CLI_DRIVERS, isCliVoice, listCliVoices } from "./src/drivers/cli-drivers.js";
+import { formatLongUpdate } from "./src/formatter.js";
 import { synthesizePanel } from "./src/synthesis.js";
 import type { VoiceResult } from "./src/types.js";
 import { findVoice, listVoices, selectSynthesizer } from "./src/voices.js";
@@ -183,6 +184,61 @@ describe("CLI driver registry", () => {
       expect(typeof driver).toBe("function");
       expect(driver.constructor.name).toBe("AsyncFunction");
     }
+  });
+});
+
+describe("formatLongUpdate", () => {
+  test("short input passes through with parseMode=null", () => {
+    const r = formatLongUpdate("hi");
+    expect(r.parseMode).toBeNull();
+    expect(r.text).toBe("hi");
+    expect(r.formatted).toBe(false);
+  });
+
+  test("long unsectioned input passes through (no headings detected)", () => {
+    const long = "x".repeat(2000);
+    const r = formatLongUpdate(long);
+    expect(r.parseMode).toBeNull();
+    expect(r.formatted).toBe(false);
+  });
+
+  test("long sectioned input renders with expandable blockquotes", () => {
+    const text = [
+      "Intro paragraph above the fold.",
+      "",
+      "LAYER 1 — REACH",
+      "x".repeat(600),
+      "",
+      "LAYER 2 — PANEL",
+      "y".repeat(600),
+      "",
+      "LAYER 3 — PRIOR",
+      "z".repeat(600),
+    ].join("\n");
+    const r = formatLongUpdate(text);
+    expect(r.parseMode).toBe("HTML");
+    expect(r.formatted).toBe(true);
+    expect(r.sections).toBe(3);
+    expect(r.text).toContain("<blockquote expandable>");
+    expect(r.text).toContain("<b>LAYER 1 — REACH</b>");
+  });
+
+  test("escapes HTML in user content", () => {
+    const text = ("LAYER A — TEST\n" + "<script>alert(1)</script>".repeat(100)).padEnd(2000, ".");
+    const r = formatLongUpdate(text);
+    expect(r.parseMode).toBe("HTML");
+    expect(r.text).not.toContain("<script>");
+    expect(r.text).toContain("&lt;script&gt;");
+  });
+
+  test("inline `code` becomes <code> + URLs auto-link", () => {
+    const text = (
+      "LAYER X — REFS\n" + "see `foo()` and https://example.com/path here.\n".repeat(40)
+    ).padEnd(2000, ".");
+    const r = formatLongUpdate(text);
+    expect(r.parseMode).toBe("HTML");
+    expect(r.text).toContain("<code>foo()</code>");
+    expect(r.text).toContain('<a href="https://example.com/path">');
   });
 });
 

@@ -23,3 +23,8 @@ export {
   type SynthesisDispatchResult,
   type SynthesizeOptions,
 } from "./src/synthesis.js";
+export {
+  formatLongUpdate,
+  type FormatLongUpdateOptions,
+  type FormatLongUpdateResult,
+} from "./src/formatter.js";

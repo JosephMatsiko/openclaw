@@ -1,4 +1,22 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 3 of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/skill-panel-ask/src/formatter.ts  (re-exported via
+//   @openclaw/skill-panel-ask api.ts)
+//
+// This .mjs preserves an identical pure-string formatter so the remaining
+// callers (chuck-broadcast.mjs, chuck-comms-cascade.mjs) keep working
+// unchanged. Vanilla Node can't import the TS plugin's api.ts at runtime,
+// so duplicating the logic is the working seam.
+//
+// EDITS: bug fixes go in BOTH places (here AND
+// extensions/skill-panel-ask/src/formatter.ts) until this shim retires.
+// The .mjs retires when chuck-broadcast + chuck-comms-cascade migrate
+// in Units 4-5 (queued).
+// =============================================================================
+//
 // chuck-format-update — pure-string formatter that turns long plain-text
 // updates into Telegram-HTML with expandable blockquotes.
 //
