@@ -204,8 +204,14 @@ export function openStore(opts: OpenStoreOptions): PriorDeltaStore {
 
   return {
     writePriorCapsule(capsule) {
-      // Append-only check: this is an INSERT.
-      validateAppendOnly({ kind: "INSERT", target: capsule });
+      // Append-only check: this is an INSERT. Pass a structural target —
+      // the validator only consults type + id; passing the whole capsule
+      // object trips TS's discriminated-union check because typed inner
+      // fields (read_markers, content) widen unpredictably.
+      validateAppendOnly({
+        kind: "INSERT",
+        target: { type: capsule.type, id: capsule.id },
+      });
       // Verify content addressing — caller may pass a placeholder id; we
       // recompute and require it to match (catches caller bugs early).
       const computed = priorCapsuleId({
@@ -229,7 +235,10 @@ export function openStore(opts: OpenStoreOptions): PriorDeltaStore {
     },
 
     writePosteriorDelta(delta) {
-      validateAppendOnly({ kind: "INSERT", target: delta });
+      validateAppendOnly({
+        kind: "INSERT",
+        target: { type: delta.type, id: delta.id },
+      });
       const computed = posteriorDeltaId({
         prior_hash: delta.prior_hash,
         voice_id: delta.voice_id,
@@ -260,7 +269,10 @@ export function openStore(opts: OpenStoreOptions): PriorDeltaStore {
     },
 
     writeCompactionRecord(record, removedDeltas, ctx) {
-      validateAppendOnly({ kind: "INSERT", target: record });
+      validateAppendOnly({
+        kind: "INSERT",
+        target: { type: record.type, id: record.id },
+      });
       // Run all four invariants at once via the composite validator. Throws
       // SchemaViolation on any failure; caller can catch and surface.
       validateCompaction(record, removedDeltas, ctx);
@@ -282,7 +294,10 @@ export function openStore(opts: OpenStoreOptions): PriorDeltaStore {
     },
 
     writeDissentRecord(record) {
-      validateAppendOnly({ kind: "INSERT", target: record });
+      validateAppendOnly({
+        kind: "INSERT",
+        target: { type: record.type, id: record.id },
+      });
       insertDissent.run(
         record.id,
         record.delta_id,

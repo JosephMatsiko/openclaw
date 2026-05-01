@@ -1,0 +1,75 @@
+{
+  "id": "chuck-pwa",
+  "name": "Chuck PWA — operator chat surface",
+  "description": "Tailscale-served chat surface for the Chuck operator (iPad / iPhone / Mac PWA). Voice picker, transcript persistence, persona injection from IDENTITY.md, programmatic dispatch through @openclaw/skill-panel-ask. Replaces the standalone chuck-pwa-server.mjs by registering routes through the openclaw gateway.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/chuck-pwa",
+  "activation": {
+    "onStartup": true
+  },
+  "uiHints": {
+    "routePrefix": {
+      "label": "HTTP route prefix",
+      "help": "Prefix under which the plugin registers all routes. Default '/chuck-v3' preserves URL compatibility with the legacy chuck-pwa-server."
+    },
+    "defaultVoice": {
+      "label": "Default voice",
+      "help": "Voice picked by the chat UI when no per-device localStorage value exists."
+    },
+    "askTimeoutMs": {
+      "label": "Ask request timeout (ms)",
+      "help": "Hard ceiling for a single /api/chuck-v3/ask round-trip."
+    },
+    "personaInjectsIdentity": {
+      "label": "Inject IDENTITY.md as persona",
+      "help": "When true, every /ask prepends the canonical IDENTITY.md plus recent memory-graph nodes. Disable to test raw model voices."
+    },
+    "personaInjectsRecentMemory": {
+      "label": "Inject recent memory-graph context",
+      "help": "When true, the last N memory-graph nodes are included in the persona preamble."
+    },
+    "personaRecentNodes": {
+      "label": "Number of recent memory-graph nodes",
+      "help": "Count of nodes pulled into the preamble. Higher = more continuity, more prompt budget."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "routePrefix": {
+        "type": "string",
+        "default": "/chuck-v3"
+      },
+      "defaultVoice": {
+        "type": "string",
+        "default": "gemini-web"
+      },
+      "askTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 180000
+      },
+      "personaInjectsIdentity": {
+        "type": "boolean",
+        "default": true
+      },
+      "personaInjectsRecentMemory": {
+        "type": "boolean",
+        "default": true
+      },
+      "personaRecentNodes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 64,
+        "default": 8
+      }
+    }
+  }
+}

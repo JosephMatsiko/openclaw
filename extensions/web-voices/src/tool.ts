@@ -55,7 +55,11 @@ export function createWebVoiceTool(_params: { api: OpenClawPluginApi; config: We
       ),
     }),
     async execute(_toolCallId: string, rawParams: Record<string, unknown>) {
-      const raw = rawParams as RawParams;
+      // Type assertion via unknown — TS rejects the direct narrowing because
+      // RawParams has stricter discriminants than Record<string, unknown>.
+      // The TypeBox schema above validates the shape at runtime; the cast
+      // is just to give the discriminated-union switch its type.
+      const raw = rawParams as unknown as RawParams;
 
       if (raw.action === "list") {
         return jsonResult({ voices: listWebVoices() });

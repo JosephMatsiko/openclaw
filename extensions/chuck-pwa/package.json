@@ -1,0 +1,16 @@
+{
+  "name": "@openclaw/plugin-chuck-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tailscale-served PWA chat surface for the Chuck operator. Routes registered on the openclaw gateway; programmatic panel_ask dispatch.",
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
