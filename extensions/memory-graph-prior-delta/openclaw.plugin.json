@@ -1,0 +1,55 @@
+{
+  "id": "memory-graph-prior-delta",
+  "name": "Memory Graph — Universal Prior + Posterior Delta",
+  "description": "Typed dissent-preserving prior contract for multi-agent OpenClaw. Adds prior-capsule, posterior-delta, compaction-record, and dissent-record node types to the memory-graph SQLite store with append-only + dissent-preservation invariants enforced as schema validators.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/memory-graph-prior-delta",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["prior_delta"]
+  },
+  "uiHints": {
+    "freshnessWindowMinutes": {
+      "label": "Read-marker freshness window (minutes)",
+      "help": "How long a per-voice read marker is considered fresh before the voice is told the prior advanced."
+    },
+    "circuitBreakerThreshold": {
+      "label": "Compaction circuit-breaker threshold",
+      "help": "How many proposed compactions can fail validation before the proposer voice is locked out."
+    },
+    "synthesizerCandidatePool": {
+      "label": "Synthesizer candidate pool",
+      "help": "Voice ids eligible to sign compaction-records as approver. Cross-family discipline applies: approver family must differ from majority contributor family."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "freshnessWindowMinutes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10080,
+        "default": 240
+      },
+      "circuitBreakerThreshold": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 5
+      },
+      "synthesizerCandidatePool": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["claude-cli", "chatgpt-web", "gemini-cli", "grok-web"]
+      }
+    }
+  }
+}
