@@ -1,9 +1,9 @@
 // @openclaw/skill-reach-cascade — entrypoint.
 //
 // Registers the reach_cascade agent tool. Programmatic API (notify,
-// summarizeStatus, replay, etc.) is exported from ./api.ts for sibling
-// plugins (chuck-cascade-watcher, chuck-broadcast, chuck-decision-engine)
-// to import directly without going through the tool layer.
+// broadcast, summarizeStatus, replay, etc.) is exported from ./api.ts for
+// sibling plugins (chuck-cascade-watcher, chuck-decision-engine) to import
+// directly without going through the tool layer.
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";

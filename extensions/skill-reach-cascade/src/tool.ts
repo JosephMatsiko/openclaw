@@ -1,15 +1,17 @@
-// `reach_cascade` agent tool — exposes notify/status/replay through openclaw's
-// tool surface so agents can drive the cascade in-conversation.
+// `reach_cascade` agent tool — exposes notify/broadcast/status/replay through
+// openclaw's tool surface so agents can drive both the first-success-wins
+// cascade and the fan-out broadcast in-conversation.
 
 import { Type } from "typebox";
 import { jsonResult, type OpenClawPluginApi } from "../api.js";
+import { broadcast } from "./broadcast.js";
 import type { ReachCascadeConfig } from "./config.js";
 import { notify } from "./notify.js";
 import { replay, summarizeStatus } from "./status.js";
-import type { NotifyPayload, Severity, Tier } from "./types.js";
+import type { ChannelName, NotifyPayload, Severity, Tier } from "./types.js";
 
 interface RawParams {
-  action: "notify" | "status" | "replay";
+  action: "notify" | "broadcast" | "status" | "replay";
   subject?: string;
   body?: string | null;
   severity?: Severity;
@@ -18,6 +20,10 @@ interface RawParams {
   dryRun?: boolean;
   skipAppleBridge?: boolean;
   ledgerEntryId?: string;
+  /** broadcast: include voice in the fan-out (default: omit). */
+  includeVoice?: boolean;
+  /** broadcast: skip these channels. */
+  exclude?: ChannelName[];
 }
 
 export function createReachCascadeTool(_params: {
@@ -29,9 +35,9 @@ export function createReachCascadeTool(_params: {
     name: "reach_cascade",
     label: "Reach Cascade",
     description:
-      "Outage-resilient comms cascade. Use 'notify' with subject + body + severity to walk the cascade (web-push -> apple-bridge -> telegram -> discord -> imessage -> sms-bridge -> voice -> digest). 'status' returns the recent ledger summary. 'replay <ledgerEntryId>' re-runs a prior cascade with antispam bypassed.",
+      "Outage-resilient comms. Use 'notify' to walk the first-success-wins cascade (web-push -> apple-bridge -> telegram -> discord -> imessage -> sms-bridge -> voice -> digest); 'broadcast' to fan-out the same payload to every enabled channel in parallel (no first-success short-circuit); 'status' for the recent cascade ledger; 'replay <ledgerEntryId>' to re-run a prior cascade with antispam bypassed.",
     parameters: Type.Object({
-      action: Type.String({ enum: ["notify", "status", "replay"] }),
+      action: Type.String({ enum: ["notify", "broadcast", "status", "replay"] }),
       subject: Type.Optional(Type.String()),
       body: Type.Optional(Type.Union([Type.String(), Type.Null()])),
       severity: Type.Optional(Type.String({ enum: ["info", "warn", "critical"] })),
@@ -51,6 +57,8 @@ export function createReachCascadeTool(_params: {
       dryRun: Type.Optional(Type.Boolean()),
       skipAppleBridge: Type.Optional(Type.Boolean()),
       ledgerEntryId: Type.Optional(Type.String()),
+      includeVoice: Type.Optional(Type.Boolean()),
+      exclude: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_toolCallId: string, rawParams: Record<string, unknown>) {
       const raw = rawParams as unknown as RawParams;
@@ -66,6 +74,25 @@ export function createReachCascadeTool(_params: {
           skipAppleBridge: raw.skipAppleBridge === true,
         };
         const result = await notify(payload, {}, config);
+        return jsonResult(result);
+      }
+      if (raw.action === "broadcast") {
+        if (!raw.subject) throw new Error("broadcast: subject is required");
+        const payload: NotifyPayload = {
+          subject: raw.subject,
+          body: raw.body ?? null,
+          severity: raw.severity,
+          origin: raw.origin ?? null,
+        };
+        const result = await broadcast(
+          payload,
+          {
+            includeVoice: raw.includeVoice === true,
+            dryRun: raw.dryRun === true,
+            exclude: raw.exclude,
+          },
+          config,
+        );
         return jsonResult(result);
       }
       if (raw.action === "status") {

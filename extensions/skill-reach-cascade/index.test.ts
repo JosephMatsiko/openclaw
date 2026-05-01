@@ -5,11 +5,12 @@
 // behavior is verified by the chuck-comms-cascade.mjs end-to-end harness
 // (which the transitional duplicate of this plugin keeps wire-compatible).
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { antispamHash, createAntispamCache } from "./src/antispam.js";
+import { broadcast } from "./src/broadcast.js";
 import {
   DEFAULT_CASCADE,
   applyQuietHoursFilter,
@@ -153,6 +154,75 @@ describe("cascade resolution", () => {
     const input = ["web-push", "apex-apple-bridge", "telegram", "voice", "digest"] as const;
     const filtered = applyQuietHoursFilter([...input], "critical", config, noon);
     expect(filtered).toEqual([...input]);
+  });
+});
+
+describe("broadcast", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "skill-reach-cascade-broadcast-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("dryRun fans out to default channels and writes a ledger entry", async () => {
+    const config = resolveConfig({
+      ledgerDir: join(dir, "notification-ledger"),
+      digestPendingDir: join(dir, "digest-pending"),
+      eventsPath: join(dir, "events.jsonl"),
+    });
+    const result = await broadcast(
+      { subject: "ship-test", body: "Unit 5 dryrun", severity: "info" },
+      { dryRun: true },
+      config,
+    );
+    expect(result.delivered).toBe(true);
+    expect(result.totalAttempts).toBeGreaterThan(0);
+    expect(result.attempts.every((a) => a.dryRun === true)).toBe(true);
+    expect(result.attempts.every((a) => a.ok)).toBe(true);
+    // Default channels: apple-bridge, telegram, discord, imessage, sms-bridge,
+    // web-push, digest = 7. voice off by default.
+    const channelNames = result.attempts.map((a) => a.channel).sort();
+    expect(channelNames).toContain("digest");
+    expect(channelNames).not.toContain("voice");
+    expect(channelNames).toContain("telegram");
+
+    // Broadcast ledger lives in <dir>/broadcast-ledger/
+    const ledgerDir = join(dir, "broadcast-ledger");
+    expect(existsSync(ledgerDir)).toBe(true);
+    const entries = readdirSync(ledgerDir).filter((n) => n.startsWith("bcast-"));
+    expect(entries.length).toBe(1);
+  });
+
+  test("includeVoice adds the voice channel to the fan-out", async () => {
+    const config = resolveConfig({
+      ledgerDir: join(dir, "notification-ledger"),
+      digestPendingDir: join(dir, "digest-pending"),
+      eventsPath: join(dir, "events.jsonl"),
+    });
+    const result = await broadcast(
+      { subject: "ship-test-voice", body: "with voice", severity: "info" },
+      { dryRun: true, includeVoice: true },
+      config,
+    );
+    expect(result.attempts.map((a) => a.channel)).toContain("voice");
+  });
+
+  test("exclude drops requested channels", async () => {
+    const config = resolveConfig({
+      ledgerDir: join(dir, "notification-ledger"),
+      digestPendingDir: join(dir, "digest-pending"),
+      eventsPath: join(dir, "events.jsonl"),
+    });
+    const result = await broadcast(
+      { subject: "ship-test-exclude", body: "no telegram", severity: "info" },
+      { dryRun: true, exclude: ["telegram", "discord"] },
+      config,
+    );
+    const channelNames = result.attempts.map((a) => a.channel);
+    expect(channelNames).not.toContain("telegram");
+    expect(channelNames).not.toContain("discord");
   });
 });
 

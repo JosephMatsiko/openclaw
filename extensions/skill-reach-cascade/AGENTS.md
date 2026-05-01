@@ -6,16 +6,21 @@ discord, imessage, sms-bridge, voice, and the digest safety-net. Salvages
 
 ## Public Contracts
 
-- Tool: `reach_cascade` (registered at startup)
-- Programmatic API: `notify`, `replay`, `summarizeStatus`, `listRecentLedger`,
-  `findLedgerEntry`, `resolveCascadeOrder`, `DEFAULT_CASCADE` from `./api.ts`
-- Types: `NotifyPayload`, `NotifyResult`, `CascadeAttempt`, `LedgerEntry`,
-  `Severity`, `Tier`, `ChannelName` from `./src/types.ts`
+- Tool: `reach_cascade` (registered at startup) — actions: `notify`
+  (first-success cascade) | `broadcast` (parallel fan-out) | `status` |
+  `replay`
+- Programmatic API: `notify`, `broadcast`, `replay`, `summarizeStatus`,
+  `listRecentLedger`, `findLedgerEntry`, `resolveCascadeOrder`,
+  `DEFAULT_CASCADE` from `./api.ts`
+- Types: `NotifyPayload`, `NotifyResult`, `BroadcastOptions`, `BroadcastResult`,
+  `CascadeAttempt`, `LedgerEntry`, `Severity`, `Tier`, `ChannelName`
+  from `./src/types.ts` and `./src/broadcast.ts`
 
 ## Internal Files
 
 - `index.ts` — plugin entry; registers reach_cascade tool
-- `src/notify.ts` — main orchestrator; tier resolution, cascade walk, ledger writes
+- `src/notify.ts` — first-success cascade orchestrator; tier resolution, cascade walk, ledger writes
+- `src/broadcast.ts` — parallel fan-out orchestrator; broadcast-ledger writes
 - `src/cascade.ts` — DEFAULT_CASCADE, resolveCascadeOrder, channel filter, quiet-hours filter
 - `src/antispam.ts` — sha1 hash + in-process cache + cold-start ledger consult
 - `src/sign.ts` — `buildSignedText` (matches chuck-comms-cascade.mjs wire format)
@@ -63,3 +68,7 @@ discord, imessage, sms-bridge, voice, and the digest safety-net. Salvages
 - `chuck-reach-ledger.mjs`, `chuck-sms-bridge.mjs`, and
   `chuck-format-update.mjs` continue as transitional duplicates while
   chuck-comms-cascade.mjs (which imports them) remains live.
+- `chuck-broadcast.mjs` was deleted in Unit 5a — `broadcast()` now lives
+  in `src/broadcast.ts` and is exposed via the `reach_cascade` tool's
+  `action: "broadcast"`. No backward-compat .mjs shim because no callers
+  existed (no launchd/cron/script invocations; pure CLI).
