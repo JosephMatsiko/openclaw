@@ -12,10 +12,13 @@
 // blocking on the larger refactor.
 
 import { spawn } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { CLI_DRIVERS, isCliVoice, listCliVoices } from "./drivers/cli-drivers.js";
+import { synthesizePanel } from "./synthesis.js";
 import type { PanelAskInput, PanelAskOutput, VoiceResult } from "./types.js";
+import { findVoice } from "./voices.js";
 
 const HOME = homedir();
 const DEFAULT_SCRIPT_PATH = join(
@@ -136,15 +139,220 @@ function parsePayload(stdout: string): RawDispatchPayload | null {
   }
 }
 
+// ─── TS-native dispatch (CLI voices only, parallel, no subprocess hop) ────
+//
+// When every requested voice is in CLI_DRIVERS, dispatch in-process via
+// Promise.all instead of subprocess-spawning apex-panel-ask.mjs. This kills
+// the 20-25s cold-start tax — a CLI-only panel completes in the time of
+// the slowest voice, not slowest-voice + plugin warmup overhead.
+//
+// Replies are written to disk in the same <Label>-<Voice>-<Date>.md shape
+// the .mjs script produces, so downstream tooling (synthesis, fleet bus)
+// keeps working without changes. Synthesis runs through ./synthesis.ts
+// (already TS-native).
+
+function todayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function expandHomeAbs(p: string | undefined, fallback: string): string {
+  if (!p) return fallback;
+  if (p.startsWith("~/")) return join(HOME, p.slice(2));
+  if (p === "~") return HOME;
+  return p;
+}
+
+function writeReplyArtifact(params: {
+  voiceId: string;
+  voiceLabel: string;
+  labelStem: string;
+  outputDir: string;
+  text: string;
+  ms: number;
+}): string {
+  const path = join(params.outputDir, `${params.labelStem}-${params.voiceLabel}-${todayYmd()}.md`);
+  if (!existsSync(dirname(path))) {
+    mkdirSync(dirname(path), { recursive: true });
+  }
+  const body = [
+    `# ${params.voiceLabel} — ${params.labelStem}`,
+    ``,
+    `Voice: ${params.voiceId}`,
+    `Retrieved: ${new Date().toISOString()}`,
+    `Latency: ${params.ms}ms`,
+    `Source: skill-panel-ask/ts-cli-dispatch`,
+    ``,
+    `---`,
+    ``,
+    params.text,
+  ].join("\n");
+  writeFileSync(path, body, "utf8");
+  return path;
+}
+
+/**
+ * Try to dispatch entirely in TypeScript when every requested voice is a
+ * CLI voice with a registered driver. Returns null when at least one voice
+ * needs the legacy subprocess path (web-chrome / native-app) — caller
+ * falls through to runPanelAskViaSubprocess.
+ */
+async function tryTsDispatch(input: PanelAskInput): Promise<PanelAskOutput | null> {
+  const requested = input.voices ?? listCliVoices();
+  if (requested.length === 0) return null;
+  if (!requested.every(isCliVoice)) return null;
+
+  const labelStem = input.label ?? "PANEL";
+  const outputDir = expandHomeAbs(input.outputDir, join(HOME, "Documents"));
+  const perVoiceTimeoutMs = input.timeoutMs ?? 300_000;
+
+  if (input.dryRun) {
+    return {
+      ok: true,
+      mode: input.mode ?? "raw",
+      voices: requested.map((id) => ({
+        id,
+        label: findVoice(id)?.label ?? id,
+        ok: true,
+        path: null,
+        chars: 0,
+        ms: 0,
+        error: null,
+      })),
+      plan: {
+        voices: [...requested],
+        mode: input.mode ?? "raw",
+        label: labelStem,
+      },
+    };
+  }
+
+  const prompt = input.prompt ?? (input.file ? readFileSync(input.file, "utf8") : "");
+  if (!prompt) {
+    return {
+      ok: false,
+      mode: input.mode ?? "raw",
+      voices: [],
+      warnings: ["panel_ask: prompt or file required"],
+    };
+  }
+
+  // Parallel dispatch — Promise.all, not Promise.allSettled, because each
+  // driver itself never throws (returns ok:false on failure).
+  const results = await Promise.all(
+    requested.map(async (voiceId): Promise<VoiceResult & { _text?: string }> => {
+      const driver = CLI_DRIVERS[voiceId];
+      const voiceMeta = findVoice(voiceId);
+      const label = voiceMeta?.label ?? voiceId;
+      try {
+        const r = await driver({ prompt, timeoutMs: perVoiceTimeoutMs });
+        if (!r.ok) {
+          return {
+            id: voiceId,
+            label,
+            ok: false,
+            path: null,
+            chars: 0,
+            ms: r.ms,
+            error: r.error ?? "unknown",
+          };
+        }
+        const path = writeReplyArtifact({
+          voiceId,
+          voiceLabel: label,
+          labelStem,
+          outputDir,
+          text: r.text,
+          ms: r.ms,
+        });
+        return {
+          id: voiceId,
+          label,
+          ok: true,
+          path,
+          chars: r.text.length,
+          ms: r.ms,
+          error: null,
+          _text: r.text,
+        };
+      } catch (err) {
+        return {
+          id: voiceId,
+          label,
+          ok: false,
+          path: null,
+          chars: 0,
+          ms: 0,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }),
+  );
+
+  // Strip the carried _text before exporting; only synthesis needs it.
+  const voiceResults: VoiceResult[] = results.map(({ _text: _, ...rest }) => rest);
+  const ok = voiceResults.some((v) => v.ok);
+
+  let synthesis: PanelAskOutput["synthesis"];
+  if (input.mode === "synthesize" && ok) {
+    const synthInput = results
+      .filter((r) => r.ok && r._text)
+      .map((r) => ({ ...r, text: r._text!, label: r.label }));
+    if (synthInput.length >= 2) {
+      const s = await synthesizePanel({
+        prompt,
+        voices: synthInput,
+        labelStem,
+        outputDir,
+        timeoutMs: perVoiceTimeoutMs,
+      });
+      synthesis = {
+        ok: s.ok,
+        path: s.path,
+        chars: s.chars,
+        ms: s.ms,
+        voices: s.voices,
+        synthesizer: s.synthesizer,
+        error: s.error ?? null,
+      };
+    }
+  }
+
+  return {
+    ok,
+    mode: input.mode ?? "raw",
+    voices: voiceResults,
+    synthesis,
+  };
+}
+
 /**
  * Run the panel and resolve a typed result.
  *
- * Subprocess-spawns apex-panel-ask.mjs with the requested voices + mode,
- * captures stdout, parses the final JSON object, and shapes the response.
+ * Fast path: when every requested voice is CLI-resident, dispatch in-process
+ * via Promise.all (no subprocess hop, parallel, ~5s instead of ~20-25s
+ * cold-start). Otherwise fall through to apex-panel-ask.mjs subprocess.
+ *
  * Returns ok=false (rather than throwing) when the dispatch fails — callers
  * can still inspect partial voice results.
  */
 export async function runPanelAsk(
+  input: PanelAskInput,
+  opts: DispatchOptions = {},
+): Promise<PanelAskOutput> {
+  // CLI fast path — only when scriptPath is empty (caller didn't pin to
+  // legacy script) and every requested voice is a CLI voice.
+  if (!opts.scriptPath) {
+    const ts = await tryTsDispatch(input);
+    if (ts) return ts;
+  }
+  return runPanelAskViaSubprocess(input, opts);
+}
+
+async function runPanelAskViaSubprocess(
   input: PanelAskInput,
   opts: DispatchOptions = {},
 ): Promise<PanelAskOutput> {

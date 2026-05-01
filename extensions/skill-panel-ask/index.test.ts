@@ -8,6 +8,8 @@
 
 import { describe, expect, test } from "vitest";
 import { resolveConfig } from "./src/config.js";
+import { runPanelAsk } from "./src/dispatch.js";
+import { CLI_DRIVERS, isCliVoice, listCliVoices } from "./src/drivers/cli-drivers.js";
 import { synthesizePanel } from "./src/synthesis.js";
 import type { VoiceResult } from "./src/types.js";
 import { findVoice, listVoices, selectSynthesizer } from "./src/voices.js";
@@ -161,5 +163,43 @@ describe("synthesis", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("no runner registered");
     expect(result.synthesizer).toBe("chatgpt-web");
+  });
+});
+
+describe("CLI driver registry", () => {
+  test("lists the four canonical CLI voices", () => {
+    expect(listCliVoices().sort()).toEqual(["claude-cli", "codex", "gemini-cli", "ollama-local"]);
+  });
+
+  test("isCliVoice discriminates CLI from web voices", () => {
+    expect(isCliVoice("claude-cli")).toBe(true);
+    expect(isCliVoice("ollama-local")).toBe(true);
+    expect(isCliVoice("chatgpt-web")).toBe(false);
+    expect(isCliVoice("nope")).toBe(false);
+  });
+
+  test("each driver is an async function", () => {
+    for (const [, driver] of Object.entries(CLI_DRIVERS)) {
+      expect(typeof driver).toBe("function");
+      expect(driver.constructor.name).toBe("AsyncFunction");
+    }
+  });
+});
+
+describe("runPanelAsk dryRun routing", () => {
+  test("CLI-only dry-run takes the TS fast path (no subprocess)", async () => {
+    const result = await runPanelAsk({
+      prompt: "test",
+      voices: ["claude-cli", "ollama-local"],
+      mode: "raw",
+      label: "DRY-CLI",
+      dryRun: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.voices).toEqual(["claude-cli", "ollama-local"]);
+    // Voice results are stubbed (not actually called) on dry-run via the TS path.
+    expect(result.voices.map((v) => v.id).sort()).toEqual(["claude-cli", "ollama-local"]);
+    // No warnings about subprocess timeout / parse failure means TS path was taken.
+    expect(result.warnings).toBeUndefined();
   });
 });
