@@ -1,0 +1,98 @@
+{
+  "id": "skill-reach-cascade",
+  "name": "Reach Cascade — comms-policy v1 enforcer",
+  "description": "Notification cascade across web-push → apex-apple-bridge → telegram → discord → imessage → sms-bridge → voice → digest. Each attempter writes the per-channel reach-ledger so future cascades rank by recency. Quiet-hours filter, anti-spam dedupe, openclaw-native send with raw-API fallback. Salvages chuck-comms-cascade.mjs into a typed openclaw skill.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-reach-cascade",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["reach_cascade"]
+  },
+  "uiHints": {
+    "telegramChatId": {
+      "label": "Telegram chat id",
+      "help": "Numeric chat id Joseph receives signed notifications on."
+    },
+    "imessageBuddy": {
+      "label": "Default iMessage / SMS recipient",
+      "help": "E.164 phone number or Apple ID. Used by both the imessage and sms-bridge channels."
+    },
+    "policyPath": {
+      "label": "Comms-policy path",
+      "help": "Absolute or ~-relative JSON file containing per-tier cascade overrides. Falls back to defaults when absent."
+    },
+    "openclawCliPath": {
+      "label": "openclaw CLI entrypoint",
+      "help": "Path to the openclaw dist entry. Used to invoke `message send` for the gateway-routed Telegram + Discord paths."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "telegramChatId": {
+        "type": "string",
+        "default": "8630163522"
+      },
+      "imessageBuddy": {
+        "type": "string",
+        "default": "+14044517063"
+      },
+      "policyPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/policies/comms-policy.json"
+      },
+      "ledgerDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/notification-ledger"
+      },
+      "digestPendingDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/morning-digest/pending"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "openclawCliPath": {
+        "type": "string",
+        "default": ""
+      },
+      "openclawNativeTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 120000,
+        "default": 30000
+      },
+      "antispamWindowMs": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 600000,
+        "default": 30000
+      },
+      "quietHoursStart": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 23,
+        "default": 23
+      },
+      "quietHoursEnd": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 23,
+        "default": 8
+      },
+      "quietHoursTimezone": {
+        "type": "string",
+        "default": "America/Chicago"
+      }
+    }
+  }
+}

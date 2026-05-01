@@ -1,0 +1,20 @@
+{
+  "name": "@openclaw/skill-reach-cascade",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Outage-resilient comms cascade: web-push → apple-bridge → telegram → discord → imessage → sms-bridge → voice → digest. Per-channel reach-ledger writes; quiet-hours + anti-spam aware.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-imessage-osascript": "workspace:*",
+    "@openclaw/plugin-reach-ledger": "workspace:*",
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

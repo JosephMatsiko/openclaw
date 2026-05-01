@@ -1,4 +1,24 @@
 #!/usr/bin/env node
+// =============================================================================
+// TRANSITIONAL DUPLICATE — Unit 4 of the openclaw-first migration (2026-05-01).
+// =============================================================================
+// The CANONICAL implementation lives at:
+//   extensions/skill-reach-cascade/src/notify.ts  (re-exported via
+//   @openclaw/skill-reach-cascade api.ts)
+//
+// This .mjs preserves an identical wire-compatible cascade so vanilla-Node
+// callers (chuck-cascade-watcher.mjs, chuck-docket-executor.mjs) keep working
+// unchanged. Vanilla Node can't import the TS plugin's api.ts at runtime, so
+// duplicating the logic is the working seam.
+//
+// EDITS: bug fixes go in BOTH places (here AND
+// extensions/skill-reach-cascade/src/*.ts) until this shim retires.
+// The .mjs retires when chuck-cascade-watcher + chuck-docket-executor migrate
+// (Unit 6 in the migration plan). At that point chuck-reach-ledger.mjs,
+// chuck-sms-bridge.mjs, and chuck-format-update.mjs (which this file imports)
+// can also retire.
+// =============================================================================
+//
 // chuck-comms-cascade — runtime enforcer for comms-policy v1.
 //
 // The policy doc declares cascade orders ("PWA → Telegram → apex-apple-bridge
