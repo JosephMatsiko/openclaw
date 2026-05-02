@@ -1,0 +1,116 @@
+{
+  "id": "skill-health-steward",
+  "name": "Health Steward — durable Mac/openclaw stewardship",
+  "description": "Receipt-first stewardship for Mac resource pressure. `status` probes disk/swap/memory/load, executor control, docket health, process groups, and the mac-self-heal plan; emits automatic + approval-gated action lists. `stabilize` applies safe automatic actions (pause executor on blocked, run safe self-heal). `apply` executes approval-gated actions (cloud-offload / purge-verified-local-archive / write-approval-capsules) with confirmation tokens. Salvages chuck-health-steward.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-health-steward",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["health_steward"]
+  },
+  "uiHints": {
+    "diskMinFreeBytes": {
+      "label": "Disk min free bytes",
+      "help": "If free disk falls below this OR diskMinFreePercent (whichever is larger), the gate is blocked and stabilize will pause executor intake."
+    },
+    "swapMaxUsedBytes": {
+      "label": "Swap max used bytes",
+      "help": "If swap used exceeds this, the gate is blocked. macOS often needs operator restart to release swap; stabilize emits an operator-handoff action."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "stewardDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/health-steward"
+      },
+      "approvalsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/approvals"
+      },
+      "executorControlPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/executor-control.json"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "macSelfHealScript": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts/chuck-mac-self-heal.mjs"
+      },
+      "macSelfHealDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "diskMinFreeBytes": {
+        "type": "integer",
+        "minimum": 1073741824,
+        "maximum": 1099511627776,
+        "default": 26843545600
+      },
+      "diskMinFreePercent": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 0.5,
+        "default": 0.1
+      },
+      "swapMaxUsedBytes": {
+        "type": "integer",
+        "minimum": 1073741824,
+        "maximum": 1099511627776,
+        "default": 10737418240
+      },
+      "loadOneWatchThreshold": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 64,
+        "default": 10
+      },
+      "freeMemoryWatchPercent": {
+        "type": "number",
+        "minimum": 0.001,
+        "maximum": 0.5,
+        "default": 0.02
+      },
+      "stabilizeMaxSafeActions": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200,
+        "default": 24
+      },
+      "applyMaxActions": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500,
+        "default": 60
+      },
+      "selfHealPlanTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 120000
+      },
+      "selfHealApplyTimeoutMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 3600000,
+        "default": 1200000
+      }
+    }
+  }
+}

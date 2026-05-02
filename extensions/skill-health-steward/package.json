@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-health-steward",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable Mac/openclaw stewardship: probes disk/swap/memory pressure + load + executor + docket + process groups, builds automatic vs approval-gated action plans, stabilizes safe pressure (pause executor + safe self-heal), apply gates approval-token actions (cloud-offload, purge-verified-local-archive, write-approval-capsules). Receipt-first. Salvages chuck-health-steward.mjs.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
