@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed HTTP client for chuck-dashboard.mjs (9454 LOC long-running cockpit on localhost:7777). Plugin-stage v0.1 wraps the live daemon's /api/* endpoints with a typed query surface for in-process callers; daemon stays in .mjs (KeepAlive=true LaunchAgent) until openclaw daemon-plugin support lands. Salvage Unit 17.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

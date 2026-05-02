@@ -1,0 +1,54 @@
+{
+  "id": "skill-dashboard",
+  "name": "Dashboard — typed HTTP client for chuck-dashboard.mjs",
+  "description": "Typed HTTP client for the chuck-dashboard cockpit (9454 LOC long-running HTTP server on localhost:7777, persistent + dynamic status surface for fleet health, principle scores, in-flight processes, recent panels, live event stream). Tool 'dashboard' actions: query (GET any /api path), health (liveness probe), status (LaunchAgent state via launchctl). Read-only — never starts/stops/restarts the daemon. Full TS port deferred to v0.2 (would require 9454 LOC port + replacing the LaunchAgent).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-dashboard",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["dashboard"]
+  },
+  "uiHints": {
+    "host": {
+      "label": "Dashboard host",
+      "help": "Defaults to 127.0.0.1 (the chuck-dashboard.mjs server only binds loopback)."
+    },
+    "port": {
+      "label": "Dashboard port",
+      "help": "Defaults to 7777 (matches chuck-dashboard.mjs DEFAULT_PORT). Honor process.env.PORT if you've reconfigured the daemon."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "host": {
+        "type": "string",
+        "default": "127.0.0.1"
+      },
+      "port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535,
+        "default": 7777
+      },
+      "queryTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 60000,
+        "default": 5000
+      },
+      "launchAgentLabel": {
+        "type": "string",
+        "default": "com.openclaw.chuck-dashboard"
+      }
+    }
+  }
+}
