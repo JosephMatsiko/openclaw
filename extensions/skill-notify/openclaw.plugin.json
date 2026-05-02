@@ -1,0 +1,62 @@
+{
+  "id": "skill-notify",
+  "name": "Notify — verified-delivery notification surface",
+  "description": "Salvages chuck-notify.mjs (375 LOC ledger-only CLI) into a typed plugin that ALSO dispatches when requested. Default behavior matches the .mjs (write the chuck-v3.notification-ledger/1 entry only). With dispatch=true, also sends via the openclaw-bound channel: telegram (HTTP API call as the openclaw bot, to the openclaw-bound chat from openclaw.json#channels.telegram) + apple-bridge desktop banner (osascript). Returns per-channel delivery receipt so callers see real ok/failure, not just ledger-write success.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-notify",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["notify"]
+  },
+  "uiHints": {
+    "ledgerRoot": {
+      "label": "Ledger root",
+      "help": "Where chuck-v3.notification-ledger/1 entries land. Each YYYYMMDD sub-dir holds notif_<ts>_<rand>.json files. Same path as chuck-notify.mjs writes."
+    },
+    "openclawConfigPath": {
+      "label": "openclaw.json path",
+      "help": "Where the Telegram bot token + chat allowlist live (channels.telegram block). Defaults to ~/.openclaw/openclaw.json."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "ledgerRoot": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/notification-ledger"
+      },
+      "openclawConfigPath": {
+        "type": "string",
+        "default": "~/.openclaw/openclaw.json"
+      },
+      "telegramApiBase": {
+        "type": "string",
+        "default": "https://api.telegram.org"
+      },
+      "telegramTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 60000,
+        "default": 5000
+      },
+      "appleBridgeEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "appleBridgeTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 30000,
+        "default": 5000
+      }
+    }
+  }
+}
