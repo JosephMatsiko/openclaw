@@ -1311,6 +1311,16 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/skill-gateway-watchdog:
+    dependencies:
+      typebox:
+        specifier: 1.1.33
+        version: 1.1.33
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/skill-morning-digest:
     dependencies:
       typebox:

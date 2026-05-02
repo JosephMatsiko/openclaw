@@ -1,0 +1,108 @@
+{
+  "id": "skill-gateway-watchdog",
+  "name": "Gateway Watchdog — auto-restart on event-loop pin",
+  "description": "Polls openclaw gateway event-loop health (parses err.log liveness warnings + ps %CPU). When a pin sustains past 60s in a 4-min window, auto-restarts via `launchctl kickstart -k gui/501/ai.openclaw.gateway`. Anti-flap backoff (2min base, doubling, 1h max). Daily restart cap (12). Salvages chuck-gateway-watchdog.mjs (probe/tick paths; daemon polling stays in .mjs).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-gateway-watchdog",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["gateway_watchdog"]
+  },
+  "uiHints": {
+    "pinDetectionWindowMs": {
+      "label": "Pin detection window (ms)",
+      "help": "Recent err.log span scanned for liveness warnings. Worst observed pin = 6.7 min sustained; default 4 min catches real pins, not long agent runs."
+    },
+    "maxRestartsPerDay": {
+      "label": "Daily restart cap",
+      "help": "Sanity ceiling. If we hit this, something is broken beyond auto-recovery and Joseph needs to intervene."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "watchdogStateDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/gateway-watchdog"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "gatewayErrLogPath": {
+        "type": "string",
+        "default": "~/.openclaw/logs/gateway.err.log"
+      },
+      "gatewayLaunchdTarget": {
+        "type": "string",
+        "default": "gui/501/ai.openclaw.gateway"
+      },
+      "gatewayPgrepPattern": {
+        "type": "string",
+        "default": "openclaw.*dist/index.js gateway"
+      },
+      "pollIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 600000,
+        "default": 60000
+      },
+      "pinDetectionWindowMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 3600000,
+        "default": 240000
+      },
+      "longBlockThresholdMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 60000
+      },
+      "highCpuThresholdPercent": {
+        "type": "integer",
+        "minimum": 50,
+        "maximum": 100,
+        "default": 80
+      },
+      "cooldownAfterRestartMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 3600000,
+        "default": 300000
+      },
+      "restartBackoffBaseMs": {
+        "type": "integer",
+        "minimum": 30000,
+        "maximum": 1800000,
+        "default": 120000
+      },
+      "restartBackoffMaxMs": {
+        "type": "integer",
+        "minimum": 300000,
+        "maximum": 86400000,
+        "default": 3600000
+      },
+      "maxRestartsPerDay": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 12
+      },
+      "historyLimit": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 10000,
+        "default": 200
+      }
+    }
+  }
+}
