@@ -1298,6 +1298,16 @@ importers:
         specifier: workspace:*
         version: link:../skill-reach-cascade
 
+  extensions/skill-docket-executor:
+    dependencies:
+      typebox:
+        specifier: 1.1.33
+        version: 1.1.33
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/skill-morning-digest:
     dependencies:
       typebox:

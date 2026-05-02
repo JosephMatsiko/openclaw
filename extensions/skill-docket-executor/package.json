@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-docket-executor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed canonical for chuck-v3 docket executor: command registry, lane policies, mac health gate, eligibility checks. Long-running daemon stays in .mjs until openclaw cron supports it (v0.2).",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

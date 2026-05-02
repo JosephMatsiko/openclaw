@@ -1,0 +1,64 @@
+{
+  "id": "skill-docket-executor",
+  "name": "Docket Executor — typed catalog + eligibility surface",
+  "description": "Typed canonical for chuck-v3 docket executor: COMMANDS registry (8 commandKinds), lane timeout/running-cap policies, mac health gate (disk + swap thresholds + lane-exempt list), eligibility checks, executor-control read. The long-running daemon (claim/run/lock/sweep/heartbeat/posterior-delta) stays in chuck-docket-executor.mjs invoked by the LaunchAgent. Salvages chuck-docket-executor.mjs (handle + status surface; daemon queued for v0.2).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-docket-executor",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["docket_executor"]
+  },
+  "uiHints": {
+    "globalRunningCap": {
+      "label": "Global running cap",
+      "help": "Hard ceiling on concurrent running tasks across all lanes."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "repoRoot": {
+        "type": "string",
+        "default": "~/Projects/openclaw"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "executorControlPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/executor-control.json"
+      },
+      "globalRunningCap": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 32,
+        "default": 6
+      },
+      "diskMinFreeBytes": {
+        "type": "integer",
+        "minimum": 1073741824,
+        "default": 26843545600
+      },
+      "diskWarnFreePercent": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 0.5,
+        "default": 0.1
+      },
+      "swapWarnUsedBytes": {
+        "type": "integer",
+        "minimum": 1073741824,
+        "default": 10737418240
+      }
+    }
+  }
+}
