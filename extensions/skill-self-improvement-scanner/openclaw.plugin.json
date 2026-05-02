@@ -1,0 +1,72 @@
+{
+  "id": "skill-self-improvement-scanner",
+  "name": "Self-Improvement Scanner — recursive autonomy primitive",
+  "description": "Periodically scans Chuck's state for gaps and drops docket tasks to fix them. Six gap categories: dockethealth (>5 failed in 24h), stuckpending (>6h pending), mcpgap (apex-* MCP not in 3 configs), plistgap (daemon .mjs without plist), skillgap (commandKind without ~/.claude/skills entry), busdiversity (<10 distinct event types in last 200). Idempotency via fingerprint dedupe; anti-flood cap of 5 tasks per scan. Salvages chuck-self-improvement-scanner.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-self-improvement-scanner",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["self_improvement_scanner"]
+  },
+  "uiHints": {
+    "maxDropsPerScan": {
+      "label": "Anti-flood cap per scan",
+      "help": "Max tasks emitted per scan run. Surplus gaps are skipped + counted in the scan summary."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "scriptsDir": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "selfImprovDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/self-improvement"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "launchAgentsDir": {
+        "type": "string",
+        "default": "~/Library/LaunchAgents"
+      },
+      "skillsDir": {
+        "type": "string",
+        "default": "~/.claude/skills"
+      },
+      "openclawConfigPath": {
+        "type": "string",
+        "default": "~/.openclaw/openclaw.json"
+      },
+      "codexConfigPath": {
+        "type": "string",
+        "default": "~/.codex/config.toml"
+      },
+      "claudeConfigPath": {
+        "type": "string",
+        "default": "~/.claude.json"
+      },
+      "maxDropsPerScan": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 5
+      }
+    }
+  }
+}
