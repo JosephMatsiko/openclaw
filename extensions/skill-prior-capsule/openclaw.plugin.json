@@ -1,0 +1,50 @@
+{
+  "id": "skill-prior-capsule",
+  "name": "Prior Capsule — typed wrapper for chuck-prior-capsule.mjs",
+  "description": "Typed surface for the chuck-prior-capsule generator. Single action 'build' invokes chuck-prior-capsule.mjs (1253 LOC source-reader + renderer) as a subprocess and parses the receipt JSON. Used by skill-prior-compaction's approve action and skill-docket-executor. Full TS source-port deferred until openclaw cron/daemon support is in.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-prior-capsule",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["prior_capsule"]
+  },
+  "uiHints": {
+    "scriptPath": {
+      "label": "chuck-prior-capsule.mjs path",
+      "help": "Path to the canonical .mjs implementation. Defaults to the repo's extensions/memory-graph/scripts/chuck-prior-capsule.mjs."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "scriptPath": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts/chuck-prior-capsule.mjs"
+      },
+      "priorsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/priors"
+      },
+      "buildTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 60000
+      },
+      "defaultLimit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200,
+        "default": 10
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-prior-capsule",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed surface for chuck-prior-capsule.mjs (1253 LOC source-reader + capsule renderer). Plugin-stage v0.1 wraps the .mjs as a subprocess to provide a type-safe in-process call site for skill-prior-compaction + skill-docket-executor; full source-port is queued for openclaw cron / daemon support. Salvage Unit 15.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
