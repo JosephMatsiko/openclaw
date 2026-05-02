@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-watchers-status",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-command health view across the chuck/apex LaunchAgent surface. Salvages chuck-watchers-status.mjs (228 LOC). Reads launchctl + ps + state files + bus events to produce one structured report.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

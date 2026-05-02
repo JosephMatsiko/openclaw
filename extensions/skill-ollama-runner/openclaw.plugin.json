@@ -1,0 +1,60 @@
+{
+  "id": "skill-ollama-runner",
+  "name": "Ollama Runner — direct local-LLM HTTP",
+  "description": "Salvages chuck-ollama-runner.mjs (325 LOC) into a typed plugin. Tool 'ollama_ask' posts to localhost:11434/api/generate with model + system + max_tokens + temp + keep_alive. Used by background watchers (chuck-introspect, chuck-decision-engine, chuck-morning-digest) to bypass the gateway's blocking subprocess harness. The .mjs survives as TRANSITIONAL DUPLICATE because apex-runtime-chooser.mjs subprocess-spawns it.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-ollama-runner",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["ollama_ask"]
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "Ollama base URL",
+      "help": "Defaults to http://localhost:11434 (env OLLAMA_BASE_URL also honored). Change for remote / Docker setups."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "baseUrl": {
+        "type": "string",
+        "default": "http://localhost:11434"
+      },
+      "defaultModel": {
+        "type": "string",
+        "default": "llama3.1:8b"
+      },
+      "defaultMaxTokens": {
+        "type": "integer",
+        "minimum": 16,
+        "maximum": 8192,
+        "default": 512
+      },
+      "defaultTemp": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 2,
+        "default": 0.2
+      },
+      "defaultKeepAlive": {
+        "type": "string",
+        "default": "10m"
+      },
+      "generateTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 60000
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-ollama-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Direct, non-blocking ollama HTTP runner for in-process callers. Salvages chuck-ollama-runner.mjs typed surface; .mjs stays canonical because apex-runtime-chooser.mjs subprocess-spawns it. Calls localhost:11434 with injectable HTTP fetcher for tests.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

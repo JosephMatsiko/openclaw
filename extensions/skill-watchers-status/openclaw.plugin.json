@@ -1,0 +1,44 @@
+{
+  "id": "skill-watchers-status",
+  "name": "Watchers Status — chuck/apex LaunchAgent health",
+  "description": "Reports health for the chuck/apex LaunchAgent set (gateway, docket-executor, dashboard, cascade-watcher, decision-engine, introspect, mac-self-heal, morning-digest, self-improvement-scanner, gateway-watchdog, vanguard, runtime-chooser, pwa-server). Per-watcher: launchctl loaded? pid? exitCode? uptime? %CPU? last bus event? last log line? state file ok? Salvages chuck-watchers-status.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-watchers-status",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["watchers_status"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "logsDir": {
+        "type": "string",
+        "default": "~/.openclaw/logs"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "busWindowHours": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 168,
+        "default": 6
+      },
+      "launchctlTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 30000,
+        "default": 5000
+      }
+    }
+  }
+}
