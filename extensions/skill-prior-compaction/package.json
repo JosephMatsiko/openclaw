@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/skill-prior-compaction",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Joseph-gated compaction gate for chuck-v3 priors. status / preview / approve commands. Mechanical claim-promotion across posterior deltas with explicit deferral reasons; approve refreshes the compact prior capsule via subprocess. Salvages chuck-prior-compaction.mjs.",
+  "type": "module",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

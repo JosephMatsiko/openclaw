@@ -1,0 +1,70 @@
+{
+  "id": "skill-prior-compaction",
+  "name": "Prior Compaction — Joseph-gated compaction decisions",
+  "description": "Mechanical claim-promotion across schema-validated posterior deltas. 'status' summarizes latest applied + draft + an in-memory preview. 'preview' produces a deterministic draft compaction (writes only with --write). 'approve' transitions a draft → approved → applying → applied with confirm token APPROVE_PRIOR_COMPACTION; applied step refreshes the compact prior capsule via chuck-prior-capsule subprocess. Salvages chuck-prior-compaction.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-prior-compaction",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["prior_compaction"]
+  },
+  "uiHints": {
+    "compactionsDir": {
+      "label": "Compactions dir",
+      "help": "Where draft / approved / applied compaction decision files live."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "compactionsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/compactions"
+      },
+      "deltasDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/posterior-deltas"
+      },
+      "priorsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/priors"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "designDir": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/data/chuck-v2-design"
+      },
+      "priorCapsuleScript": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts/chuck-prior-capsule.mjs"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "defaultLimit": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 10000,
+        "default": 1000
+      },
+      "priorCapsuleTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 600000,
+        "default": 60000
+      }
+    }
+  }
+}
