@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-mac-self-heal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed surface for chuck-mac-self-heal.mjs (1272 LOC reversible local-machine stewardship). Plugin-stage v0.1 wraps the .mjs as a subprocess to provide a type-safe in-process call site for skill-health-steward + skill-docket-executor + skill-self-improvement-scanner; full source-port queued for the daemon-plugin phase. Salvage Unit 16.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

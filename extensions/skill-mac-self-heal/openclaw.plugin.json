@@ -1,0 +1,62 @@
+{
+  "id": "skill-mac-self-heal",
+  "name": "Mac Self-Heal — typed wrapper for chuck-mac-self-heal.mjs",
+  "description": "Typed surface for the chuck-mac-self-heal stewardship script. Three subprocess actions: status (read disk/swap/loadavg/uptime + last-receipt summary), plan (enumerate reversible actions, --allow-cloud-offload widens to evidence offload), apply (execute up to --max-actions with --only-under-pressure / --cloud-target / --allow-cloud-offload gating). Used by skill-health-steward (stabilize + apply paths), skill-docket-executor, and skill-self-improvement-scanner. Full TS port deferred until openclaw daemon support lands.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-mac-self-heal",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["mac_self_heal"]
+  },
+  "uiHints": {
+    "scriptPath": {
+      "label": "chuck-mac-self-heal.mjs path",
+      "help": "Path to the canonical .mjs implementation. Defaults to the repo's extensions/memory-graph/scripts/chuck-mac-self-heal.mjs."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "scriptPath": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/scripts/chuck-mac-self-heal.mjs"
+      },
+      "stateDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal"
+      },
+      "statusTimeoutMs": {
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 120000,
+        "default": 30000
+      },
+      "planTimeoutMs": {
+        "type": "integer",
+        "minimum": 10000,
+        "maximum": 300000,
+        "default": 120000
+      },
+      "applyTimeoutMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 3600000,
+        "default": 1200000
+      },
+      "defaultMaxActions": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500,
+        "default": 24
+      }
+    }
+  }
+}
