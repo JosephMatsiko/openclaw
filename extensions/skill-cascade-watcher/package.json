@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/skill-cascade-watcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tails apex-events.jsonl and routes failure-class / notable events through skill-reach-cascade. Trigger table + anti-recursion + anti-flood + auto-promote-to-docket.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*",
+    "@openclaw/skill-reach-cascade": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

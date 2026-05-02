@@ -1272,6 +1272,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/skill-cascade-watcher:
+    dependencies:
+      typebox:
+        specifier: 1.1.33
+        version: 1.1.33
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@openclaw/skill-reach-cascade':
+        specifier: workspace:*
+        version: link:../skill-reach-cascade
+
   extensions/skill-decision-engine:
     dependencies:
       typebox:

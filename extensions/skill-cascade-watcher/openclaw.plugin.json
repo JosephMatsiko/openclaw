@@ -1,0 +1,92 @@
+{
+  "id": "skill-cascade-watcher",
+  "name": "Cascade Watcher — bus-tail comms-cascade trigger",
+  "description": "Tails apex-events.jsonl and routes failure-class / notable bus events through @openclaw/skill-reach-cascade. Editable trigger table; anti-recursion guards; anti-flood (3 fires per 5min per type+source); auto-promote-to-docket for medium/high introspect observations. Salvages chuck-cascade-watcher.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-cascade-watcher",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["cascade_watcher"]
+  },
+  "uiHints": {
+    "pollIntervalMs": {
+      "label": "Poll interval (ms)",
+      "help": "How often to stat the events file. fs.watch is unreliable for append-only logs on macOS APFS; polling at 500ms costs ~2 syscalls/sec."
+    },
+    "antifloodWindowMs": {
+      "label": "Anti-flood window (ms)",
+      "help": "Per (triggerType + source), more than antifloodMaxFires inside this window suppresses further fires until reset."
+    },
+    "antifloodMaxFires": {
+      "label": "Anti-flood max fires",
+      "help": "Max fires per (triggerType + source) inside the anti-flood window."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "watcherStateDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/cascade-watcher"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "pollIntervalMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 10000,
+        "default": 500
+      },
+      "seenBacklogLines": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000,
+        "default": 200
+      },
+      "seenCacheMax": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 100000,
+        "default": 5000
+      },
+      "antifloodWindowMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 3600000,
+        "default": 300000
+      },
+      "antifloodMaxFires": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 3
+      },
+      "stateRecentLimit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000,
+        "default": 50
+      },
+      "promotedRecentLimit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10000,
+        "default": 200
+      }
+    }
+  }
+}
