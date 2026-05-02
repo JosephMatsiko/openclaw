@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-introspect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LLM-driven novel-situation reasoning. Reads state bundle, asks claude-cli for observations, dedupes via fingerprint history.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

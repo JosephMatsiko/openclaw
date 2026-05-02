@@ -1,0 +1,118 @@
+{
+  "id": "skill-introspect",
+  "name": "Introspect — novel-situation reasoning loop",
+  "description": "Where skill-decision-engine pattern-detects from a fixed list of six rules, this layer reads recent state and asks claude-cli (Opus 4.7 via Joseph's Max sub) to introspect for things the rule-based engine WOULD NOT catch — surprising patterns, emerging risks, cross-subsystem correlations, drift from established discipline, things technically working but architecturally wrong. Observations are PROPOSALS, never auto-applied. Salvages chuck-introspect.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-introspect",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["introspect"]
+  },
+  "uiHints": {
+    "claudeTimeoutMs": {
+      "label": "Claude-CLI timeout (ms)",
+      "help": "Hard cap on the LLM reasoning subprocess. Default 5min — long enough for Opus 4.7 to read the full state bundle and emit observations."
+    },
+    "maxObservationsPerScan": {
+      "label": "Max observations per scan",
+      "help": "Cap on observations emitted per scan. Quality over quantity."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "introspectionsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/introspections"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "decisionsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/decisions"
+      },
+      "macHealReceiptsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal/receipts"
+      },
+      "notificationLedgerDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/notification-ledger"
+      },
+      "selfImprovementLastScanPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/self-improvement/last-scan.json"
+      },
+      "healthSnapshotPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/health-snapshot.json"
+      },
+      "priorsLatestPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/priors/latest.json"
+      },
+      "dissentDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/dissent"
+      },
+      "claudeCliPath": {
+        "type": "string",
+        "default": "claude"
+      },
+      "claudeModel": {
+        "type": "string",
+        "default": "opus"
+      },
+      "claudeTimeoutMs": {
+        "type": "integer",
+        "minimum": 30000,
+        "maximum": 1800000,
+        "default": 300000
+      },
+      "maxObservationsPerScan": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 3
+      },
+      "fingerprintHistoryCap": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 1000,
+        "default": 50
+      },
+      "dedupWindowDays": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30,
+        "default": 7
+      },
+      "priorHeadChars": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 100000,
+        "default": 8000
+      },
+      "healthHeadChars": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 50000,
+        "default": 4000
+      }
+    }
+  }
+}
