@@ -1,0 +1,72 @@
+{
+  "id": "skill-posterior-delta",
+  "name": "Posterior Delta — append-only writer",
+  "description": "Mechanical converter from chuck-v2/v3 family runner-execution receipts into schema-validated, append-only posterior delta records (chuck.posterior-delta.v1) plus read markers (chuck.read-marker.v1) when a prior capsule was injected into the executor prompt. Preserves family attribution + evidence pointers; never asks a model to merge into the shared prior. Salvages chuck-posterior-delta.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-posterior-delta",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["posterior_delta"]
+  },
+  "uiHints": {
+    "deltasDir": {
+      "label": "Posterior deltas dir",
+      "help": "Where written deltas land. Reader subsystems (compaction gate, dashboard) consume from this dir."
+    },
+    "readMarkersDir": {
+      "label": "Read markers dir",
+      "help": "Where read markers land when the executor prompt was injected with a prior capsule. Read markers feed the prior compaction decision."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "deltasDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/posterior-deltas"
+      },
+      "readMarkersDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/read-markers"
+      },
+      "priorsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/priors"
+      },
+      "runsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v2/runs"
+      },
+      "designDir": {
+        "type": "string",
+        "default": "~/Projects/openclaw/extensions/memory-graph/data/chuck-v2-design"
+      },
+      "maxClaimsPerDelta": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 12
+      },
+      "maxOpenQuestions": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 12
+      },
+      "maxRecommendations": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 8
+      }
+    }
+  }
+}
