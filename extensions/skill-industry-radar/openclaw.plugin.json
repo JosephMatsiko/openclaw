@@ -1,0 +1,70 @@
+{
+  "id": "skill-industry-radar",
+  "name": "Industry Radar — upstream-commit watcher",
+  "description": "Per-commit watcher for upstream source repos: surfaces architectural decisions (AGENTS.md / CLAUDE.md / breaking changes / refactors) Joseph's openclaw fork should react to. Heuristic relevance score over `gh api repos/<owner>/<repo>/commits` output; emits chuck.industry.radar.* bus events that apex-daily-digest folds into the morning Telegram summary. Salvages chuck-industry-radar.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-industry-radar",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["industry_radar"]
+  },
+  "uiHints": {
+    "sourcesPath": {
+      "label": "Sources config path",
+      "help": "JSON file with `repos: [{owner, repo, id, weight}]` describing the upstream surfaces to watch. Defaults to ~/.openclaw/workspace/state/chuck-v3/industry-radar/sources.json."
+    },
+    "perRepoCap": {
+      "label": "Per-repo flagged-commit cap",
+      "help": "Max commits surfaced per repo per scan. Keeps the daily digest readable even on a noisy upstream."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "stateDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/industry-radar"
+      },
+      "eventsPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/apex-events.jsonl"
+      },
+      "ghCliPath": {
+        "type": "string",
+        "default": "gh"
+      },
+      "ghTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 600000,
+        "default": 30000
+      },
+      "perRepoCap": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 8
+      },
+      "ghPerPage": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 50
+      },
+      "fallbackLookbackHours": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 720,
+        "default": 36
+      }
+    }
+  }
+}

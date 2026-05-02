@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/skill-industry-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Upstream-commit watcher: per-commit gh-api polling + heuristic relevance scoring + apex-events bus emit. The daily digest folds in surfaced commits via apex-daily-digest.",
+  "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
