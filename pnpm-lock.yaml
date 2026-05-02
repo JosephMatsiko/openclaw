@@ -384,6 +384,9 @@ importers:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@openclaw/plugin-web-push':
+        specifier: workspace:*
+        version: link:../web-push
 
   extensions/chutes:
     devDependencies:
@@ -1346,6 +1349,9 @@ importers:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@openclaw/plugin-web-push':
+        specifier: workspace:*
+        version: link:../web-push
 
   extensions/skill-task-validator:
     dependencies:
@@ -1568,6 +1574,16 @@ importers:
         version: link:../../packages/plugin-sdk
 
   extensions/vydra:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  extensions/web-push:
+    dependencies:
+      typebox:
+        specifier: 1.1.33
+        version: 1.1.33
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*

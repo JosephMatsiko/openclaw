@@ -23,8 +23,11 @@ import {
   listSubscriptions,
   loadVapidKeys,
   removeSubscription,
+  resolveConfig as resolveWebPushConfig,
   saveSubscription,
-} from "../../memory-graph/scripts/chuck-web-push.mjs";
+} from "../../web-push/api.js";
+
+const webPushConfig = resolveWebPushConfig({});
 
 const HOME = homedir();
 const CHUCK_V3 = join(HOME, ".openclaw", "workspace", "state", "chuck-v3");
@@ -104,7 +107,7 @@ function isValidSubscription(obj: unknown): obj is PushSubscriptionBody {
 export function makeVapidPublicHandler() {
   return async (_req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     try {
-      const keys = loadVapidKeys();
+      const keys = loadVapidKeys(webPushConfig);
       if (!keys?.publicKey) {
         sendJson(res, 500, { error: "vapid keys present but missing publicKey" });
         return true;
@@ -138,7 +141,7 @@ export function makeSubscribeHandler() {
     const userAgent = typeof body.userAgent === "string" ? body.userAgent : null;
     const { userAgent: _, ...sub } = body;
     try {
-      const result = saveSubscription({ ...sub, userAgent });
+      const result = saveSubscription({ ...sub, userAgent }, webPushConfig);
       sendJson(res, result?.deduped ? 200 : 201, {
         ok: true,
         deduped: !!result?.deduped,
@@ -169,7 +172,7 @@ export function makeUnsubscribeHandler() {
       return true;
     }
     try {
-      const result = removeSubscription(body.endpoint);
+      const result = removeSubscription(body.endpoint, webPushConfig);
       sendJson(res, 200, { ok: true, removed: !!result?.ok });
     } catch (err) {
       sendJson(res, 500, {
@@ -184,7 +187,7 @@ export function makeUnsubscribeHandler() {
 export function makeSubscriptionsListHandler() {
   return async (_req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     try {
-      const subs = await listSubscriptions();
+      const subs = listSubscriptions(webPushConfig);
       sendJson(res, 200, { count: subs.length, subscriptions: subs });
     } catch (err) {
       sendJson(res, 500, {

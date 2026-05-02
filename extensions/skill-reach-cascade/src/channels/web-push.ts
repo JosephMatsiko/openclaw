@@ -4,23 +4,24 @@
 // PWA) without routing through Telegram. Falls through to apex-apple-bridge
 // when no subscriptions are registered (empty PWA install state).
 //
-// Backed by chuck-web-push.mjs — typed via the .d.mts companion that ships
-// next to the script. Web-push migration into a dedicated openclaw plugin is
-// queued separately; for now this channel calls the .mjs API the same way
-// chuck-pwa does.
+// Backed by @openclaw/plugin-web-push (Unit 7 salvage of chuck-web-push.mjs).
+// Programmatic API: listSubscriptions + sendWebPush from sibling extension.
 
 import {
   listSubscriptions,
+  resolveConfig as resolveWebPushConfig,
   sendWebPush,
   type PushSubscriptionRecord,
-} from "../../../memory-graph/scripts/chuck-web-push.mjs";
+} from "../../../web-push/api.js";
 import type { AttemptResult, NotifyPayload } from "../types.js";
+
+const webPushConfig = resolveWebPushConfig({});
 
 export async function attemptWebPush(payload: NotifyPayload): Promise<AttemptResult> {
   const start = Date.now();
   let subs: PushSubscriptionRecord[];
   try {
-    subs = await listSubscriptions();
+    subs = listSubscriptions(webPushConfig);
   } catch (err) {
     return {
       ok: false,
@@ -44,7 +45,7 @@ export async function attemptWebPush(payload: NotifyPayload): Promise<AttemptRes
     },
   };
   const results = await Promise.all(
-    subs.map((s) => sendWebPush({ subscription: s, payload: wpPayload })),
+    subs.map((s) => sendWebPush({ subscription: s, payload: wpPayload }, webPushConfig)),
   );
   const okCount = results.filter((r) => r.ok).length;
   const failures = results

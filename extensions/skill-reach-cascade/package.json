@@ -10,7 +10,8 @@
   "devDependencies": {
     "@openclaw/plugin-imessage-osascript": "workspace:*",
     "@openclaw/plugin-reach-ledger": "workspace:*",
-    "@openclaw/plugin-sdk": "workspace:*"
+    "@openclaw/plugin-sdk": "workspace:*",
+    "@openclaw/plugin-web-push": "workspace:*"
   },
   "openclaw": {
     "extensions": [

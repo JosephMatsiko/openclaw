@@ -1,0 +1,48 @@
+{
+  "id": "web-push",
+  "name": "Web Push — RFC 8030 / 8291 / 8292 sender",
+  "description": "VAPID JWT signing + ECDH-ES + HKDF + AES-128-GCM payload encryption + POST to push endpoint, plus subscription store for the chuck-v3 PWA. Wraps the `web-push` npm lib. Used by @openclaw/plugin-chuck-pwa for /push/* endpoints and @openclaw/skill-reach-cascade for the web-push channel attempter. Salvages chuck-web-push.mjs.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/web-push",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["web_push"]
+  },
+  "uiHints": {
+    "vapidPath": {
+      "label": "VAPID keys path",
+      "help": "JSON file with publicKey / privateKey / subject. Generated once during onboarding; perms 600."
+    },
+    "subscriptionDir": {
+      "label": "Subscription store dir",
+      "help": "Per-device sub-<sha1(endpoint).slice(0,12)>.json files. Endpoint-based dedupe."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "vapidPath": {
+        "type": "string",
+        "default": "~/.openclaw/credentials/web-push-vapid.json"
+      },
+      "subscriptionDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/push-subscriptions"
+      },
+      "defaultTtlSeconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 86400,
+        "default": 60
+      }
+    }
+  }
+}
