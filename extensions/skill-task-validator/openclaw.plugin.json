@@ -1,0 +1,74 @@
+{
+  "id": "skill-task-validator",
+  "name": "Task Validator — closed-loop deliverable check",
+  "description": "Post-spawn validator for chuck-v3 docket tasks: heuristic checks (deliverable existence + size + syntactic check + freshness vs startedAt) per commandKind, plus optional LLM-introspection layer for build-class tasks. Catches the failure mode where the executor records 'completed' on exit=0 but the deliverable was never written. Salvages chuck-task-validator.mjs (heuristic path; LLM layer queued for follow-up).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/openclaw/openclaw/tree/main/extensions/skill-task-validator",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["validate_task"]
+  },
+  "uiHints": {
+    "repoRoot": {
+      "label": "Repo root for relative deliverable paths",
+      "help": "Where intent text mentioning relative paths (e.g. 'extensions/foo/bar.mjs') resolves from."
+    },
+    "skipLlmLayer": {
+      "label": "Skip LLM-introspection layer",
+      "help": "When true, validator runs heuristics only. v0.1 ships heuristic-only by default; LLM layer queued for v0.2."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "repoRoot": {
+        "type": "string",
+        "default": "~/Projects/openclaw"
+      },
+      "docketDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/docket"
+      },
+      "macHealLatestPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal/latest.json"
+      },
+      "macHealReceiptsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/mac-self-heal/receipts"
+      },
+      "scoutsDir": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/scouts"
+      },
+      "priorsLatestPath": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/state/chuck-v3/priors/latest.json"
+      },
+      "openclawConfigPath": {
+        "type": "string",
+        "default": "~/.openclaw/openclaw.json"
+      },
+      "codexConfigPath": {
+        "type": "string",
+        "default": "~/.codex/config.toml"
+      },
+      "claudeConfigPath": {
+        "type": "string",
+        "default": "~/.claude.json"
+      },
+      "skipLlmLayer": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  }
+}
